@@ -66,22 +66,19 @@ public class SignatureCipherManager {
           "\\s*" + VARIABLE_PART_OBJECT_DECLARATION + "\\s*:\\s*function\\s*\\([^)]*\\)\\s*\\{[^{}]*(?:\\{[^{}]*}[^{}]*)*}\\s*};");
 
 private static final Pattern SIG_FUNCTION_PATTERN = Pattern.compile(
-    "function\\s*([a-zA-Z_0-9$]+)\\s*\\(\\s*([a-zA-Z_0-9$]+)\\s*\\)\\s*\\{" +
+    "var\\s+([a-zA-Z_0-9$]+)=\\s*function\\(\\s*([a-zA-Z_0-9$]+)\\s*\\)\\s*\\{" +
     ".*?" +
-    "\\2=\\2\\.split\\(\"\"\\);" +
+    "\\s*\\2\\s*=\\s*\\2\\.split\\(\"\"\\);" +
     ".*?" +
-    "return\\s*\\2\\.join\\(\"\"\\);" +
-    "}",
+    "return\\s+([a-zA-Z_0-9$]+)\\s*\\(\\s*\\2\\s*,\\s*\\d+\\)\\s*\\}",
     Pattern.DOTALL
 );
 
 private static final Pattern N_FUNCTION_PATTERN = Pattern.compile(
     "function\\(\\s*(" + VARIABLE_PART + ")\\s*\\)\\s*\\{" +
+    "var\\s*(" + VARIABLE_PART + ")=\\1\\.split\\(\"\"\\);" +
     ".*?" +
-    "if\\s*\\(" + VARIABLE_PART + "\\s*\\)" +
-    "\\s*return\\s*.*?;" +
-    "\\s*var\\s*(" + VARIABLE_PART + ")=\\s*\\['(9h|9|h|8)',.*?concat\\s*\\(\\[.*?]\\)\\s*;.*?" +
-    "return\\s*\\2\\s*;\\s*}",
+    "\\s*return\\s*" + VARIABLE_PART + "\\s*\\([a-zA-Z_0-9$]+,(\\2)\\s*\\)",
     Pattern.DOTALL
 );
 
