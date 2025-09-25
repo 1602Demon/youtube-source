@@ -39,7 +39,7 @@ import java.util.stream.Stream;
 import static com.sedmelluq.discord.lavaplayer.tools.ExceptionTools.throwWithDebugInfo;
 
 /**
- * Handles parsing and caching of signature ciphers
+ * Handles parsing and caching of signature cipherss
  */
 @SuppressWarnings({"RegExpRedundantEscape", "RegExpUnnecessaryNonCapturingGroup"})
 public class SignatureCipherManager {
