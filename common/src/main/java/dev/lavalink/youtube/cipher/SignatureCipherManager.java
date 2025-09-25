@@ -59,23 +59,21 @@ public class SignatureCipherManager {
           "|\"[^\"]*\"\\.split\\(\"[^\"]*\"\\)))"
   );
 
-private static final Pattern ACTIONS_PATTERN = Pattern.compile(
-    "var\\s+([a-zA-Z0-9_$]+)\\s*=\\s*\\{.*?\\};",
+  private static final Pattern ACTIONS_PATTERN = Pattern.compile(
+      "var\\s+([$A-Za-z0-9_]+)\\s*=\\s*\\{" +
+          "\\s*" + VARIABLE_PART_OBJECT_DECLARATION + "\\s*:\\s*function\\s*\\([^)]*\\)\\s*\\{[^{}]*(?:\\{[^{}]*}[^{}]*)*}\\s*," +
+          "\\s*" + VARIABLE_PART_OBJECT_DECLARATION + "\\s*:\\s*function\\s*\\([^)]*\\)\\s*\\{[^{}]*(?:\\{[^{}]*}[^{}]*)*}\\s*," +
+          "\\s*" + VARIABLE_PART_OBJECT_DECLARATION + "\\s*:\\s*function\\s*\\([^)]*\\)\\s*\\{[^{}]*(?:\\{[^{}]*}[^{}]*)*}\\s*};");
+
+private static final Pattern SIG_FUNCTION_PATTERN = Pattern.compile(
+    "(?:[a-zA-Z0-9_$]{2,})\\s*=\\s*function\\s*\\(\\s*([a-zA-Z0-9_$]+)\\s*\\)\\s*\\{[^}]*return[^}]*\\}", 
     Pattern.DOTALL
 );
 
-private static final Pattern SIG_FUNCTION_PATTERN = Pattern.compile(
-    "function\\s*([a-zA-Z0-9_$]+)\\s*\\(\\s*([a-zA-Z0-9_$]+)\\s*\\)\\s*\\{[^}]*\\}"
+private static final Pattern N_FUNCTION_PATTERN = Pattern.compile(
+    "([a-zA-Z0-9_$]{2,})\\s*=\\s*function\\s*\\(\\s*([a-zA-Z0-9_$]+)\\s*\\)\\s*\\{[^}]*\\}", 
+    Pattern.DOTALL
 );
-
-  private static final Pattern N_FUNCTION_PATTERN = Pattern.compile(
-      "function\\(\\s*(" + VARIABLE_PART + ")\\s*\\)\\s*\\{" +
-          "var\\s*(" + VARIABLE_PART + ")=\\1\\[" + VARIABLE_PART + "\\[\\d+\\]\\]\\(" + VARIABLE_PART + "\\[\\d+\\]\\)" +
-          ".*?catch\\(\\s*(\\w+)\\s*\\)\\s*\\{" +
-          "\\s*return.*?\\+\\s*\\1\\s*}" +
-          "\\s*return\\s*\\2\\[" + VARIABLE_PART + "\\[\\d+\\]\\]\\(" + VARIABLE_PART + "\\[\\d+\\]\\)};",
-      Pattern.DOTALL
-  );
 
   // old?
   private static final Pattern functionPatternOld = Pattern.compile(
@@ -245,52 +243,49 @@ private static final Pattern SIG_FUNCTION_PATTERN = Pattern.compile(
     }
   }
 
-private SignatureCipher extractFromScript(@NotNull String script, @NotNull String sourceUrl) {
-    // 1️⃣ Extract timestamp
-    Matcher timestampMatcher = TIMESTAMP_PATTERN.matcher(script);
-    String timestamp = timestampMatcher.find() ? timestampMatcher.group(2) : "0";
+  private SignatureCipher extractFromScript(@NotNull String script, @NotNull String sourceUrl) {
+    Matcher scriptTimestamp = TIMESTAMP_PATTERN.matcher(script);
 
-    // 2️⃣ Find the signature function name dynamically
-    Matcher sigFuncNameMatcher = Pattern.compile("\\.sig\\s*\\|\\|\\s*([a-zA-Z0-9_$]+)\\(").matcher(script);
-    if (!sigFuncNameMatcher.find()) {
-        scriptExtractionFailed(script, sourceUrl, ExtractionFailureType.DECIPHER_FUNCTION_NOT_FOUND);
-    }
-    String sigFuncName = sigFuncNameMatcher.group(1);
-
-    // 3️⃣ Extract the signature function body
-    Pattern sigFuncPattern = Pattern.compile("function\\s+" + Pattern.quote(sigFuncName) + "\\s*\\(([^)]*)\\)\\s*\\{([\\s\\S]*?)\\}");
-    Matcher sigFuncMatcher = sigFuncPattern.matcher(script);
-    if (!sigFuncMatcher.find()) {
-        scriptExtractionFailed(script, sourceUrl, ExtractionFailureType.DECIPHER_FUNCTION_NOT_FOUND);
-    }
-    String sigFunction = sigFuncMatcher.group(0);
-
-    // 4️⃣ Extract helper object name used inside the sig function
-    Matcher helperNameMatcher = Pattern.compile("([a-zA-Z0-9_$]{2})\\.([a-zA-Z0-9_$]{2})\\(").matcher(sigFunction);
-    String helperObjName = helperNameMatcher.find() ? helperNameMatcher.group(1) : null;
-
-    String sigActions = "";
-    if (helperObjName != null) {
-        // 5️⃣ Extract helper object functions
-        Pattern helperPattern = Pattern.compile("var\\s+" + Pattern.quote(helperObjName) + "\\s*=\\s*\\{([\\s\\S]*?)\\};");
-        Matcher helperMatcher = helperPattern.matcher(script);
-        if (helperMatcher.find()) {
-            sigActions = helperMatcher.group(0);
-        }
+    if (!scriptTimestamp.find()) {
+      scriptExtractionFailed(script, sourceUrl, ExtractionFailureType.TIMESTAMP_NOT_FOUND);
     }
 
-    // 6️⃣ Extract n function (for encrypted n parameter)
-    Matcher nFuncMatcher = N_FUNCTION_PATTERN.matcher(script);
-    String nFunction = "";
-    if (nFuncMatcher.find()) {
-        nFunction = nFuncMatcher.group(0);
-        String nfParam = DataFormatTools.extractBetween(nFunction, "(", ")");
-        // Remove short-circuit return
-        nFunction = nFunction.replaceAll("if\\s*\\(typeof\\s*[^\\s()]+\\s*===?.*?\\)return " + nfParam + "\\s*;?", "");
+    Matcher globalVarsMatcher = GLOBAL_VARS_PATTERN.matcher(script);
+
+    if (!globalVarsMatcher.find()) {
+      scriptExtractionFailed(script, sourceUrl, ExtractionFailureType.VARIABLES_NOT_FOUND);
     }
 
-    return new SignatureCipher(timestamp, "", sigActions, sigFunction, nFunction, script);
-}
+    Matcher sigActionsMatcher = ACTIONS_PATTERN.matcher(script);
+
+    if (!sigActionsMatcher.find()) {
+      scriptExtractionFailed(script, sourceUrl, ExtractionFailureType.SIG_ACTIONS_NOT_FOUND);
+    }
+
+    Matcher sigFunctionMatcher = SIG_FUNCTION_PATTERN.matcher(script);
+
+    if (!sigFunctionMatcher.find()) {
+      scriptExtractionFailed(script, sourceUrl, ExtractionFailureType.DECIPHER_FUNCTION_NOT_FOUND);
+    }
+
+    Matcher nFunctionMatcher = N_FUNCTION_PATTERN.matcher(script);
+
+    if (!nFunctionMatcher.find()) {
+      scriptExtractionFailed(script, sourceUrl, ExtractionFailureType.N_FUNCTION_NOT_FOUND);
+    }
+
+    String timestamp = scriptTimestamp.group(2);
+    String globalVars = globalVarsMatcher.group("code");
+    String sigActions = sigActionsMatcher.group(0);
+    String sigFunction = sigFunctionMatcher.group(0);
+    String nFunction = nFunctionMatcher.group(0);
+
+    String nfParameterName = DataFormatTools.extractBetween(nFunction, "(", ")");
+    // Remove short-circuit that prevents n challenge transformation
+    nFunction = nFunction.replaceAll("if\\s*\\(typeof\\s*[^\\s()]+\\s*===?.*?\\)return " + nfParameterName + "\\s*;?", "");
+
+    return new SignatureCipher(timestamp, globalVars, sigActions, sigFunction, nFunction, script);
+  }
 
   private void scriptExtractionFailed(String script, String sourceUrl, ExtractionFailureType failureType) {
     dumpProblematicScript(script, sourceUrl, "must find " + failureType.friendlyName);
