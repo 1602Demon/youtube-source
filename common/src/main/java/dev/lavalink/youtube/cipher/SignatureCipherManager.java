@@ -246,6 +246,10 @@ private SignatureCipher extractFromScript(@NotNull String script, @NotNull Strin
     if (!scriptTimestamp.find()) {
         scriptExtractionFailed(script, sourceUrl, ExtractionFailureType.TIMESTAMP_NOT_FOUND);
     }
+    Matcher globalVarsMatcher = GLOBAL_VARS_PATTERN.matcher(script);
+    if (!globalVarsMatcher.find()) {
+        scriptExtractionFailed(script, sourceUrl, ExtractionFailureType.VARIABLES_NOT_FOUND);
+    }
     Matcher sigActionsMatcher = ACTIONS_PATTERN.matcher(script);
     if (!sigActionsMatcher.find()) {
         scriptExtractionFailed(script, sourceUrl, ExtractionFailureType.SIG_ACTIONS_NOT_FOUND);
@@ -260,6 +264,7 @@ private SignatureCipher extractFromScript(@NotNull String script, @NotNull Strin
     }
 
     String timestamp = scriptTimestamp.group(2);
+    String globalVars = globalVarsMatcher.group("code");
     String sigActions = sigActionsMatcher.group(0);
     String sigFunction = sigFunctionMatcher.group(0);
     String nFunction = nFunctionMatcher.group(0);
@@ -267,7 +272,6 @@ private SignatureCipher extractFromScript(@NotNull String script, @NotNull Strin
     // Remove short-circuit that prevents n challenge transformation
     nFunction = nFunction.replaceAll("if\\s*\\(typeof\\s*[^\\s()]+\\s*===?.*?\\)return " + nfParameterName + "\\s*;?", "");
     
-    // This is the new part for finding the functions
     Pattern functionPattern = Pattern.compile(
         "var\\s+([A-Za-z0-9_]+)\\s*=\\s*function\\s*\\(([A-Za-z0-9_]+)\\)\\s*\\{.*?\\};",
         Pattern.DOTALL
@@ -294,8 +298,8 @@ private SignatureCipher extractFromScript(@NotNull String script, @NotNull Strin
         scriptExtractionFailed(script, sourceUrl, ExtractionFailureType.N_FUNCTION_NOT_FOUND);
     }
 
-    // Now, create the new signature cipher with the dynamically found functions
-    return new SignatureCipher(timestamp, sigActions, sigFunction, nFunction, script, sigFuncName, nFuncName);
+    // This line is now correct and includes the 'globalVars' argument
+    return new SignatureCipher(timestamp, globalVars, sigActions, sigFunction, nFunction, script, sigFuncName, nFuncName);
 }
 
     private void scriptExtractionFailed(String script, String sourceUrl, ExtractionFailureType failureType) {
