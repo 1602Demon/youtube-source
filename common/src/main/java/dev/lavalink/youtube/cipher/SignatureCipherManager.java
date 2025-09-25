@@ -65,22 +65,24 @@ public class SignatureCipherManager {
           "\\s*" + VARIABLE_PART_OBJECT_DECLARATION + "\\s*:\\s*function\\s*\\([^)]*\\)\\s*\\{[^{}]*(?:\\{[^{}]*}[^{}]*)*}\\s*," +
           "\\s*" + VARIABLE_PART_OBJECT_DECLARATION + "\\s*:\\s*function\\s*\\([^)]*\\)\\s*\\{[^{}]*(?:\\{[^{}]*}[^{}]*)*}\\s*};");
 
-private static final Pattern SIG_FUNCTION_PATTERN = Pattern.compile(
-    "var\\s+([a-zA-Z_0-9$]+)=\\s*function\\(\\s*([a-zA-Z_0-9$]+)\\s*\\)\\s*\\{" +
-    ".*?" +
-    "\\s*\\2\\s*=\\s*\\2\\.split\\(\"\"\\);" +
-    ".*?" +
-    "return\\s+([a-zA-Z_0-9$]+)\\s*\\(\\s*\\2\\s*,\\s*\\d+\\)\\s*\\}",
+private static final Pattern SIG_FUNCTION_DECLARATION_PATTERN = Pattern.compile(
+    "function\\s+(?:" + VARIABLE_PART + ")\\s*\\(\\s*(" + VARIABLE_PART + ")\\s*\\)\\s*\\{([\\s\\S]{0,2000}?)return\\s+\\1\\s*;?\\s*\\}",
     Pattern.DOTALL
 );
 
-private static final Pattern N_FUNCTION_PATTERN = Pattern.compile(
-    "function\\(\\s*(" + VARIABLE_PART + ")\\s*\\)\\s*\\{" +
-    "var\\s*(" + VARIABLE_PART + ")=\\1\\.split\\(\"\"\\);" +
-    ".*?" +
-    "\\s*return\\s*" + VARIABLE_PART + "\\s*\\([a-zA-Z_0-9$]+,(\\2)\\s*\\)",
+private static final Pattern SIG_FUNCTION_ASSIGNMENT_PATTERN = Pattern.compile(
+    "(" + VARIABLE_PART + ")\\s*=\\s*function\\s*\\(\\s*(" + VARIABLE_PART + ")\\s*\\)\\s*\\{([\\s\\S]{0,2000}?)return\\s+\\2\\s*;?\\s*\\}",
     Pattern.DOTALL
 );
+
+  private static final Pattern N_FUNCTION_PATTERN = Pattern.compile(
+      "function\\(\\s*(" + VARIABLE_PART + ")\\s*\\)\\s*\\{" +
+          "var\\s*(" + VARIABLE_PART + ")=\\1\\[" + VARIABLE_PART + "\\[\\d+\\]\\]\\(" + VARIABLE_PART + "\\[\\d+\\]\\)" +
+          ".*?catch\\(\\s*(\\w+)\\s*\\)\\s*\\{" +
+          "\\s*return.*?\\+\\s*\\1\\s*}" +
+          "\\s*return\\s*\\2\\[" + VARIABLE_PART + "\\[\\d+\\]\\]\\(" + VARIABLE_PART + "\\[\\d+\\]\\)};",
+      Pattern.DOTALL
+  );
 
   // old?
   private static final Pattern functionPatternOld = Pattern.compile(
@@ -268,12 +270,23 @@ private static final Pattern N_FUNCTION_PATTERN = Pattern.compile(
     if (!sigActionsMatcher.find()) {
       scriptExtractionFailed(script, sourceUrl, ExtractionFailureType.SIG_ACTIONS_NOT_FOUND);
     }
+String sigFunction = null;
+    // Try declaration first
+Matcher decl = SIG_FUNCTION_DECLARATION_PATTERN.matcher(script);
+if (decl.find()) {
+  // full matched function text
+  sigFunction = decl.group(0);
+} else {
+  // Try assignment form (var = function(...) {...})
+  Matcher assign = SIG_FUNCTION_ASSIGNMENT_PATTERN.matcher(script);
+  if (assign.find()) {
+    sigFunction = assign.group(0);
+  }
+}
 
-    Matcher sigFunctionMatcher = SIG_FUNCTION_PATTERN.matcher(script);
-
-    if (!sigFunctionMatcher.find()) {
-      scriptExtractionFailed(script, sourceUrl, ExtractionFailureType.DECIPHER_FUNCTION_NOT_FOUND);
-    }
+if (sigFunction == null) {
+  scriptExtractionFailed(script, sourceUrl, ExtractionFailureType.DECIPHER_FUNCTION_NOT_FOUND);
+}
 
     Matcher nFunctionMatcher = N_FUNCTION_PATTERN.matcher(script);
 
