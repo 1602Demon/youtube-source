@@ -123,7 +123,7 @@ public class SignatureCipherManager {
             try {
                 uri.setParameter(format.getSignatureKey(), cipher.apply(signature, scriptEngine));
             } catch (ScriptException | NoSuchMethodException e) {
-                dumpProblematicScript(cipherCache.get(playerScript).rawScript, playerScript, "Can't transform s parameter " + signature);
+                dumpProblematicScript(cipherCache.get(playerScript).getRawScript(), playerScript, "Can't transform s parameter " + signature);
             }
         }
           
@@ -150,7 +150,7 @@ public class SignatureCipherManager {
             } catch (ScriptException | NoSuchMethodException e) {
                 // URLs can still be played without a resolved n parameter. It just means they're
                 // throttled. But we shouldn't throw an exception anyway as it's not really fatal.
-                dumpProblematicScript(cipherCache.get(playerScript).rawScript, playerScript, "Can't transform n parameter " + nParameter + " with " + cipher.nFunction + " n function");
+                dumpProblematicScript(cipherCache.get(playerScript).getRawScript(), playerScript, "Can't transform n parameter " + nParameter + " with " + cipher.nFunction + " n function");
             }
         }
 
