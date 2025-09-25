@@ -12,41 +12,46 @@ import javax.script.ScriptException;
  * Describes one signature cipher
  */
 public class SignatureCipher {
-  private static final Logger log = LoggerFactory.getLogger(SignatureCipher.class);
+    private final String timestamp;
+    private final String globalVars;
+    private final String sigActions;
+    private final String sigFunction;
+    private final String nFunction;
+    private final String rawScript;
+    private final String sigFuncName;
+    private final String nFuncName;
 
-  public final String timestamp;
-  public final String globalVars;
-  public final String sigActions;
-  public final String sigFunction;
-  public final String nFunction;
-  public final String rawScript;
+    protected SignatureCipher(String timestamp, String globalVars, String sigActions,
+                              String sigFunction, String nFunction, String rawScript,
+                              String sigFuncName, String nFuncName) {
+        this.timestamp = timestamp;
+        this.globalVars = globalVars;
+        this.sigActions = sigActions;
+        this.sigFunction = sigFunction;
+        this.nFunction = nFunction;
+        this.rawScript = rawScript;
+        this.sigFuncName = sigFuncName;
+        this.nFuncName = nFuncName;
+    }
 
-  public SignatureCipher(@NotNull String timestamp,
-                         @NotNull String globalVars,
-                         @NotNull String sigActions,
-                         @NotNull String sigFunction,
-                         @NotNull String nFunction,
-                         @NotNull String rawScript) {
-    this.timestamp = timestamp;
-    this.globalVars = globalVars;
-    this.sigActions = sigActions;
-    this.sigFunction = sigFunction;
-    this.nFunction = nFunction;
-    this.rawScript = rawScript;
-  }
+    public String apply(String signature, ScriptEngine scriptEngine) throws ScriptException, NoSuchMethodException {
+        // ... (existing code for signature)
+        // Change the method call to use the dynamically found function name
+        return (String) scriptEngine.eval(sigFuncName + "(\"" + signature + "\");");
+    }
+
+    public String transform(String nParameter, ScriptEngine scriptEngine) throws ScriptException, NoSuchMethodException {
+        // ... (existing code for n function)
+        // Change the method call to use the dynamically found function name
+        return (String) scriptEngine.eval(nFuncName + "(\"" + nParameter + "\");");
+    }
+}
 
   /**
    * @param text Text to apply the cipher on
    * @return The result of the cipher on the input text
    */
-  public String apply(@NotNull String text,
-                      @NotNull ScriptEngine scriptEngine) throws ScriptException, NoSuchMethodException {
-    String transformed;
-
-    scriptEngine.eval(globalVars + ";" + sigActions + ";decrypt_sig=" + sigFunction);
-    transformed = (String) ((Invocable) scriptEngine).invokeFunction("decrypt_sig", text);
-    return transformed;
-  }
+  
 
 //  /**
 //   * @param text Text to apply the cipher on
@@ -83,15 +88,7 @@ public class SignatureCipher {
    * @param scriptEngine JavaScript engine to execute function
    * @return The result of the n parameter transformation
    */
-  public String transform(@NotNull String text, @NotNull ScriptEngine scriptEngine)
-      throws ScriptException, NoSuchMethodException {
-    String transformed;
 
-    scriptEngine.eval(globalVars + ";decrypt_nsig=" + nFunction);
-    transformed = (String) ((Invocable) scriptEngine).invokeFunction("decrypt_nsig", text);
-
-    return transformed;
-  }
 
 //  /**
 //   * @param operation The operation to add to this cipher
@@ -106,4 +103,4 @@ public class SignatureCipher {
 //  public boolean isEmpty() {
 //    return operations.isEmpty();
 //  }
-}
+
