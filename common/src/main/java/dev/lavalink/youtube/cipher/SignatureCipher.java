@@ -7,6 +7,7 @@ import org.slf4j.LoggerFactory;
 import javax.script.Invocable;
 import javax.script.ScriptEngine;
 import javax.script.ScriptException;
+import com.sedmelluq.discord.lavaplayer.tools.DataFormatTools;
 
 /**
  * Describes one signature cipher
@@ -38,17 +39,18 @@ public class SignatureCipher {
         return rawScript;
     }
 
+    public String getNFunction() {
+        return nFunction;
+    }
+
     public String apply(String signature, ScriptEngine scriptEngine) throws ScriptException, NoSuchMethodException {
-        // ... (existing code for signature)
         return (String) scriptEngine.eval(sigFuncName + "(\"" + signature + "\");");
     }
 
     public String transform(String nParameter, ScriptEngine scriptEngine) throws ScriptException, NoSuchMethodException {
-        // ... (existing code for n function)
         return (String) scriptEngine.eval(nFuncName + "(\"" + nParameter + "\");");
     }
 }
-
   /**
    * @param text Text to apply the cipher on
    * @return The result of the cipher on the input text
