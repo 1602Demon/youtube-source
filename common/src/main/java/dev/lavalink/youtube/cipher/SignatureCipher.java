@@ -34,15 +34,17 @@ public class SignatureCipher {
         this.nFuncName = nFuncName;
     }
 
+    public String getRawScript() {
+        return rawScript;
+    }
+
     public String apply(String signature, ScriptEngine scriptEngine) throws ScriptException, NoSuchMethodException {
         // ... (existing code for signature)
-        // Change the method call to use the dynamically found function name
         return (String) scriptEngine.eval(sigFuncName + "(\"" + signature + "\");");
     }
 
     public String transform(String nParameter, ScriptEngine scriptEngine) throws ScriptException, NoSuchMethodException {
         // ... (existing code for n function)
-        // Change the method call to use the dynamically found function name
         return (String) scriptEngine.eval(nFuncName + "(\"" + nParameter + "\");");
     }
 }
