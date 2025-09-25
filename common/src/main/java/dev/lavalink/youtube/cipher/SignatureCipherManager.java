@@ -60,7 +60,7 @@ public class SignatureCipherManager {
   );
 
   private static final Pattern ACTIONS_PATTERN = Pattern.compile(
-      "var\\s+([$A-Za-z0-9_]+)\\s*=\\s*\\{" +
+      "var\\s+([$A-Za-z0-9_-]+)\\s*=\\s*\\{" +
           "\\s*" + VARIABLE_PART_OBJECT_DECLARATION + "\\s*:\\s*function\\s*\\([^)]*\\)\\s*\\{[^{}]*(?:\\{[^{}]*}[^{}]*)*}\\s*," +
           "\\s*" + VARIABLE_PART_OBJECT_DECLARATION + "\\s*:\\s*function\\s*\\([^)]*\\)\\s*\\{[^{}]*(?:\\{[^{}]*}[^{}]*)*}\\s*," +
           "\\s*" + VARIABLE_PART_OBJECT_DECLARATION + "\\s*:\\s*function\\s*\\([^)]*\\)\\s*\\{[^{}]*(?:\\{[^{}]*}[^{}]*)*}\\s*};");
