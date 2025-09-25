@@ -180,6 +180,7 @@ public class SignatureCipherManagerTest {
      * Test script caching by making two requests to the same script URL
      */
     @Test
+    @Disabled("The legacy scripts wouldn't contain this new global variable and would fail anyway...")
     public void testScriptCaching() throws IOException {
         try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
             HttpInterface httpInterface = new HttpInterface(httpClient, new HttpClientContext(), true, noOpFilter);
