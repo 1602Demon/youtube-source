@@ -66,13 +66,13 @@ public class SignatureCipherManager {
           "\\s*" + VARIABLE_PART_OBJECT_DECLARATION + "\\s*:\\s*function\\s*\\([^)]*\\)\\s*\\{[^{}]*(?:\\{[^{}]*}[^{}]*)*}\\s*};");
 
 private static final Pattern SIG_FUNCTION_PATTERN = Pattern.compile(
-    "([a-zA-Z_0-9$]+)=function\\(([a-zA-Z_0-9$]+),([a-zA-Z_0-9$]+)\\)\\{var\\s+([a-zA-Z_0-9$]+)=new\\s+([a-zA-Z_0-9$]+)\\(([a-zA-Z_0-9$]+)\\)\\}",
-    Pattern.DOTALL
+    "([a-zA-Z_0-9$]+)=function\\(([a-zA-Z_0-9$]+),([a-zA-Z_0-9$]+)\\)\\{var\\s+([a-zA-Z_0-9$]+)=new\\s+([a-zA-Z_0-9$]+)\\(([a-zA-Z_0-9$]+)\\)\\}",
+    Pattern.DOTALL
 );
 
 private static final Pattern N_FUNCTION_PATTERN = Pattern.compile(
-    "([a-zA-Z_0-9$]+)=function\\(([a-zA-Z_0-9$]+)\\)\\{var\\s+([a-zA-Z_0-9$]+)=\\2\\.split\\(\"\"\\);.*?\\}",
-    Pattern.DOTALL
+    "([a-zA-Z_0-9$]+)=function\\(([a-zA-Z_0-9$]+)\\)\\{var\\s+([a-zA-Z_0-9$]+)=\\2\\.split\\(\"\"\\);.*?\\}",
+    Pattern.DOTALL
 );
 
   // old?
