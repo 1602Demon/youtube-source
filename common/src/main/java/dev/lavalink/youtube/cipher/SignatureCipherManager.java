@@ -45,26 +45,38 @@ import static com.sedmelluq.discord.lavaplayer.tools.ExceptionTools.throwWithDeb
 public class SignatureCipherManager {
   private static final Logger log = LoggerFactory.getLogger(SignatureCipherManager.class);
 
-  private static final String VARIABLE_PART = "[a-zA-Z_\\$][a-zA-Z_0-9\\$]*";
-  private static final String VARIABLE_PART_OBJECT_DECLARATION = "[\"']?[a-zA-Z_\\$][a-zA-Z_0-9\\$]*[\"']?";
+  private static final String VARIABLE_PART = "[a-zA-Z_\\$][a-zA-Z0-9\\$]*";
+  private static final String VARIABLE_PART_OBJECT_DECLARATION = "[\"']?[a-zA-Z_\\$][a-zA-Z0-9\\$]*[\"']?";
 
-  // --- Replace the existing pattern constants with these more permissive/fallback patterns ---
-  private static final Pattern TIMESTAMP_PATTERN = Pattern.compile("(?:signatureTimestamp|sts)\\s*[:=]\\s*(\\d+)");
-  // global vars: either "var a = '...'.split('x')" or "var a = ['x','y',...]" or "window['...']=..."
+  private static final Pattern TIMESTAMP_PATTERN = Pattern.compile("(signatureTimestamp|sts):(\\d+)");
+
   private static final Pattern GLOBAL_VARS_PATTERN = Pattern.compile(
-      "(?s)(?:var|let)\\s+([A-Za-z0-9_$]+)\\s*=\\s*(?:\"[^\"]*\"\\.split\\(\"[^\"]*\"\\)|'[^']*'\\.split\\('[^']*'\\)|\\[[^\\]]+\\])"
+      "('use\\s*strict';)?" +
+          "(?<code>var\\s*(?<varname>[a-zA-Z0-9_$]+)\\s*=\\s*" +
+          "(?<value>(?:\"[^\"\\\\]*(?:\\\\.[^\"\\\\]*)*\"|'[^'\\\\]*(?:\\\\.[^'\\\\]*)*')" +
+          "\\.split\\((?:\"[^\"\\\\]*(?:\\\\.[^\"\\\\]*)*\"|'[^'\\\\]*(?:\\\\.[^'\\\\]*)*')\\)" +
+          "|\\[(?:(?:\"[^\"\\\\]*(?:\\\\.[^\"\\\\]*)*\"|'[^'\\\\]*(?:\\\\.[^'\\\\]*)*')\\s*,?\\s*)*\\]" +
+          "|\"[^\"]*\"\\.split\\(\"[^\"]*\"\\)))"
   );
-  // object containing actions - more permissive; try to find a "var X = { ... }" that contains functions
+
   private static final Pattern ACTIONS_PATTERN = Pattern.compile(
-      "(?s)var\\s+([A-Za-z0-9_$]+)\\s*=\\s*\\{\\s*(?:[^{}]*?function[^{}]*?\\}\\s*,\\s*){1,6}[^}]*\\}"
-  );
-  // signature function (looking for function that operates on a string and uses common ops)
+      "var\\s+([$A-Za-z0-9_]+)\\s*=\\s*\\{" +
+          "\\s*" + VARIABLE_PART_OBJECT_DECLARATION + "\\s*:\\s*function\\s*\\([^)]*\\)\\s*\\{[^{}]*(?:\\{[^{}]*}[^{}]*)*}\\s*," +
+          "\\s*" + VARIABLE_PART_OBJECT_DECLARATION + "\\s*:\\s*function\\s*\\([^)]*\\)\\s*\\{[^{}]*(?:\\{[^{}]*}[^{}]*)*}\\s*," +
+          "\\s*" + VARIABLE_PART_OBJECT_DECLARATION + "\\s*:\\s*function\\s*\\([^)]*\\)\\s*\\{[^{}]*(?:\\{[^{}]*}[^{}]*)*}\\s*};");
+
   private static final Pattern SIG_FUNCTION_PATTERN = Pattern.compile(
-      "(?s)function\\s*([A-Za-z0-9_$]*)\\s*\\(\\s*([A-Za-z0-9_$]+)\\s*\\)\\s*\\{[^}]{20,1000}?(?:reverse|splice|slice|join|split|charAt|push)[^}]{0,1000}?\\}"
+      "function(?:\\s+" + VARIABLE_PART + ")?\\((" + VARIABLE_PART + ")\\)\\{" +
+          VARIABLE_PART + "=" + VARIABLE_PART + ".*?\\(\\1,\\d+\\);return\\s*\\1.*};"
   );
-  // n-function (heuristic): function that takes parameter and accesses arrays/indices and/or has "catch" branches
+
   private static final Pattern N_FUNCTION_PATTERN = Pattern.compile(
-      "(?s)function\\s*\\(?\\s*([A-Za-z0-9_$]+)\\s*\\)?\\s*\\{[^}]{20,1000}?(?:\\[\\d+\\]|catch\\(|try\\{|return[^;]{0,200}n|enhanced_except_)[^}]{0,1000}?\\}"
+      "function\\(\\s*(" + VARIABLE_PART + ")\\s*\\)\\s*\\{" +
+          "var\\s*(" + VARIABLE_PART + ")=\\1\\[" + VARIABLE_PART + "\\[\\d+\\]\\]\\(" + VARIABLE_PART + "\\[\\d+\\]\\)" +
+          ".*?catch\\(\\s*(\\w+)\\s*\\)\\s*\\{" +
+          "\\s*return.*?\\+\\s*\\1\\s*}" +
+          "\\s*return\\s*\\2\\[" + VARIABLE_PART + "\\[\\d+\\]\\]\\(" + VARIABLE_PART + "\\[\\d+\\]\\)};",
+      Pattern.DOTALL
   );
 
   // old?
@@ -235,115 +247,47 @@ public class SignatureCipherManager {
     }
   }
 
-  // --- Replace extractFromScript(...) with this defensive implementation ---
   private SignatureCipher extractFromScript(@NotNull String script, @NotNull String sourceUrl) {
-    // attempt timestamp
     Matcher scriptTimestamp = TIMESTAMP_PATTERN.matcher(script);
+
     if (!scriptTimestamp.find()) {
       scriptExtractionFailed(script, sourceUrl, ExtractionFailureType.TIMESTAMP_NOT_FOUND);
     }
 
-    String timestamp = scriptTimestamp.group(1);
-
-    // Attempt to find global vars array/string.split(...) block
-    String globalVars = null;
     Matcher globalVarsMatcher = GLOBAL_VARS_PATTERN.matcher(script);
-    if (globalVarsMatcher.find()) {
-      // extract surrounding snippet (include some lines before/after to preserve context)
-      int start = Math.max(0, globalVarsMatcher.start() - 200);
-      int end = Math.min(script.length(), globalVarsMatcher.end() + 200);
-      globalVars = script.substring(start, end);
-    }
 
-    // Try a few fallback searches for globalVars if not found
-    if (globalVars == null) {
-      // fallback: search for any ".split(" array or any array literal near "var.*=\\["
-      Pattern alt = Pattern.compile("(?s)(?:var|let)\\s+[A-Za-z0-9_$]+\\s*=\\s*(?:\\[[^\\]]+\\]|\"[^\"]*\"\\.split\\([^)]*\\))");
-      Matcher mAlt = alt.matcher(script);
-      if (mAlt.find()) {
-        int start = Math.max(0, mAlt.start() - 200);
-        int end = Math.min(script.length(), mAlt.end() + 200);
-        globalVars = script.substring(start, end);
-      }
-    }
-
-    if (globalVars == null) {
+    if (!globalVarsMatcher.find()) {
       scriptExtractionFailed(script, sourceUrl, ExtractionFailureType.VARIABLES_NOT_FOUND);
     }
 
-    // Find action object (a var = { ... } that contains function members)
-    String sigActions = null;
     Matcher sigActionsMatcher = ACTIONS_PATTERN.matcher(script);
-    if (sigActionsMatcher.find()) {
-      int start = Math.max(0, sigActionsMatcher.start() - 50);
-      int end = Math.min(script.length(), sigActionsMatcher.end() + 10);
-      sigActions = script.substring(start, end);
-    } else {
-      // fallback: try to locate an object literal assigned to a variable that contains function keywords
-      Pattern objAlt = Pattern.compile("(?s)([A-Za-z0-9_$]{1,40})\\s*=\\s*\\{[^}]{30,2000}\\}");
-      Matcher altM = objAlt.matcher(script);
-      while (altM.find()) {
-        String candidate = script.substring(Math.max(0, altM.start() - 20), Math.min(script.length(), altM.end() + 20));
-        if (candidate.contains("function") || candidate.contains(":function")) {
-          sigActions = candidate;
-          break;
-        }
-      }
-    }
-    if (sigActions == null) {
+
+    if (!sigActionsMatcher.find()) {
       scriptExtractionFailed(script, sourceUrl, ExtractionFailureType.SIG_ACTIONS_NOT_FOUND);
     }
 
-    // Find signature function
-    String sigFunction = null;
     Matcher sigFunctionMatcher = SIG_FUNCTION_PATTERN.matcher(script);
-    if (sigFunctionMatcher.find()) {
-      int start = Math.max(0, sigFunctionMatcher.start() - 20);
-      int end = Math.min(script.length(), sigFunctionMatcher.end() + 4);
-      sigFunction = script.substring(start, end);
-    } else {
-      // fallback: look for inline function assigned to a variable or an object method that contains the sig ops
-      Pattern altSig = Pattern.compile("(?s)([A-Za-z0-9_$]{1,60})\\s*:\\s*function\\s*\\([^)]*\\)\\s*\\{[^}]{20,1000}\\}");
-      Matcher altSigM = altSig.matcher(sigActions != null ? sigActions : script);
-      if (altSigM.find()) {
-        sigFunction = altSigM.group(0);
-      }
-    }
-    if (sigFunction == null) {
+
+    if (!sigFunctionMatcher.find()) {
       scriptExtractionFailed(script, sourceUrl, ExtractionFailureType.DECIPHER_FUNCTION_NOT_FOUND);
     }
 
-    // Find n-function
-    String nFunction = null;
     Matcher nFunctionMatcher = N_FUNCTION_PATTERN.matcher(script);
-    if (nFunctionMatcher.find()) {
-      int start = Math.max(0, nFunctionMatcher.start() - 20);
-      int end = Math.min(script.length(), nFunctionMatcher.end() + 4);
-      nFunction = script.substring(start, end);
-    } else {
-      // fallback: try to find any function that references 'n' param or includes 'enhanced_except' or similar
-      Pattern altN = Pattern.compile("(?s)function\\s*\\(?\\s*[A-Za-z0-9_$]+\\s*\\)?\\s*\\{[^}]{30,1000}(?:enhanced_except_|_w8_|n\\))[^}]*\\}");
-      Matcher altNM = altN.matcher(script);
-      if (altNM.find()) {
-        nFunction = script.substring(Math.max(0, altNM.start() - 20), Math.min(script.length(), altNM.end() + 4));
-      }
+
+    if (!nFunctionMatcher.find()) {
+      scriptExtractionFailed(script, sourceUrl, ExtractionFailureType.N_FUNCTION_NOT_FOUND);
     }
 
-    if (nFunction == null) {
-      // Not fatal — the n parameter may be missing in some formats; we'll still proceed but warn
-      log.warn("N function not found in player script {} — continuing without n transform", sourceUrl);
-      nFunction = "";
-    }
+    String timestamp = scriptTimestamp.group(2);
+    String globalVars = globalVarsMatcher.group("code");
+    String sigActions = sigActionsMatcher.group(0);
+    String sigFunction = sigFunctionMatcher.group(0);
+    String nFunction = nFunctionMatcher.group(0);
 
-    // remove short circuit from nFunction if present (similar to previous logic)
-    if (!nFunction.isEmpty()) {
-      String nfParameterName = DataFormatTools.extractBetween(nFunction, "(", ")");
-      if (nfParameterName != null) {
-        nFunction = nFunction.replaceAll("if\\s*\\(typeof\\s*[^\\s()]+\\s*===?.*?\\)return\\s*" + Pattern.quote(nfParameterName) + "\\s*;?", "");
-      }
-    }
+    String nfParameterName = DataFormatTools.extractBetween(nFunction, "(", ")");
+    // Remove short-circuit that prevents n challenge transformation
+    nFunction = nFunction.replaceAll("if\\s*\\(typeof\\s*[^\\s()]+\\s*===?.*?\\)return " + nfParameterName + "\\s*;?", "");
 
-    // Return the cipher
     return new SignatureCipher(timestamp, globalVars, sigActions, sigFunction, nFunction, script);
   }
 
