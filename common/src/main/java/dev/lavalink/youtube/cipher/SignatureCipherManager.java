@@ -52,7 +52,7 @@ public class SignatureCipherManager {
 
   private static final Pattern GLOBAL_VARS_PATTERN = Pattern.compile(
       "('use\\s*strict';)?" +
-          "(?<code>var\\s*(?<varname>[a-zA-Z0-9_]+)\\s*=\\s*" +
+          "(?<code>var\\s*(?<varname>[a-zA-Z0-9_$]+)\\s*=\\s*" +
           "(?<value>(?:\"[^\"\\\\]*(?:\\\\.[^\"\\\\]*)*\"|'[^'\\\\]*(?:\\\\.[^'\\\\]*)*')" +
           "\\.split\\((?:\"[^\"\\\\]*(?:\\\\.[^\"\\\\]*)*\"|'[^'\\\\]*(?:\\\\.[^'\\\\]*)*')\\)" +
           "|\\[(?:(?:\"[^\"\\\\]*(?:\\\\.[^\"\\\\]*)*\"|'[^'\\\\]*(?:\\\\.[^'\\\\]*)*')\\s*,?\\s*)*\\]" +
@@ -60,15 +60,14 @@ public class SignatureCipherManager {
   );
 
   private static final Pattern ACTIONS_PATTERN = Pattern.compile(
-      "var\\s+([$A-Za-z0-9_-]+)\\s*=\\s*\\{" +
-          "\\s*" + VARIABLE_PART_OBJECT_DECLARATION + "\\s*:\\s*function\\s*\\([^)]*\\)\\s*\\{[^{}]*(?:\\{[^{}]*}[^{}]*)*}\\s*," +
-          "\\s*" + VARIABLE_PART_OBJECT_DECLARATION + "\\s*:\\s*function\\s*\\([^)]*\\)\\s*\\{[^{}]*(?:\\{[^{}]*}[^{}]*)*}\\s*," +
-          "\\s*" + VARIABLE_PART_OBJECT_DECLARATION + "\\s*:\\s*function\\s*\\([^)]*\\)\\s*\\{[^{}]*(?:\\{[^{}]*}[^{}]*)*}\\s*};");
+    "var\\s+([$A-Za-z0-9_-]+)\\s*=\\s*\\{" +
+    "\\s*" + VARIABLE_PART_OBJECT_DECLARATION + "\\s*:\\s*function\\s*\\([^)]*\\)\\s*\\{[^{}]*(?:\\{[^{}]*}[^{}]*)*}\\s*," +
+    "...};"
+);
 
-  private static final Pattern SIG_FUNCTION_PATTERN = Pattern.compile(
-      "function(?:\\s+" + VARIABLE_PART + ")?\\((" + VARIABLE_PART + ")\\)\\{" +
-          VARIABLE_PART + "=" + VARIABLE_PART + ".*?\\(\\1,\\d+\\);return\\s*\\1.*};"
-  );
+private static final Pattern SIG_FUNCTION_PATTERN = Pattern.compile(
+    "function\\s*([a-zA-Z0-9_$]+)\\s*\\(\\s*([a-zA-Z0-9_$]+)\\s*\\)\\s*\\{[^}]*\\}"
+);
 
   private static final Pattern N_FUNCTION_PATTERN = Pattern.compile(
       "function\\(\\s*(" + VARIABLE_PART + ")\\s*\\)\\s*\\{" +
