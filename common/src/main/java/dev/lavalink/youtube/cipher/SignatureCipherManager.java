@@ -66,8 +66,14 @@ public class SignatureCipherManager {
           "\\s*" + VARIABLE_PART_OBJECT_DECLARATION + "\\s*:\\s*function\\s*\\([^)]*\\)\\s*\\{[^{}]*(?:\\{[^{}]*}[^{}]*)*}\\s*};");
 
 private static final Pattern SIG_FUNCTION_PATTERN = Pattern.compile(
-      "(?:\\w+ = )?function\\(([a-zA-Z_0-9$]+)\\)\\{.*?\\1=.*?\\(.*?\\);.*?return\\s*\\1.*?;}"
-  );
+    "function\\s*([a-zA-Z_0-9$]+)\\s*\\(\\s*([a-zA-Z_0-9$]+)\\s*\\)\\s*\\{" +
+    ".*?" +
+    "\\2=\\2\\.split\\(\"\"\\);" +
+    ".*?" +
+    "return\\s*\\2\\.join\\(\"\"\\);" +
+    "}",
+    Pattern.DOTALL
+);
 
 private static final Pattern N_FUNCTION_PATTERN = Pattern.compile(
     "function\\(\\s*(" + VARIABLE_PART + ")\\s*\\)\\s*\\{" +
