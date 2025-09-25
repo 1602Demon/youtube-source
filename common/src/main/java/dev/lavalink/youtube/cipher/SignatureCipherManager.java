@@ -70,9 +70,8 @@ private static final Pattern SIG_FUNCTION_PATTERN = Pattern.compile(
   );
 
 private static final Pattern N_FUNCTION_PATTERN = Pattern.compile(
-    "var [a-zA-Z_\\$]{0,2}=function\\([a-zA-Z_\\$]\\){var [a-zA-Z_\\$]=[" +
-    "a-zA-Z_\\$]\\[\"split\"\\]\\(\"\"\\)\\[\"map\"\\]\\(function\\([a-zA-Z_\\$]\\)" +
-    "\\{return [a-zA-Z_\\$]\\}\);return [a-zA-Z_\\$]\\};"
+    "var [a-zA-Z_\\$]{0,2}=function\\([a-zA-Z_\\$]\\){var [a-zA-Z_\\$]=[a-zA-Z_\\$]\\[\"split\"\\]\\(\"\"\\)\\[\"map\"\\]\\(function\\([a-zA-Z_\\$]\\)\\{return [a-zA-Z_\\$]\\}\);return [a-zA-Z_\\$]\\};",
+    Pattern.DOTALL
 );
 
   // old?
