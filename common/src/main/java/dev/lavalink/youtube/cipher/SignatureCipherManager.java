@@ -71,11 +71,7 @@ private static final Pattern SIG_FUNCTION_PATTERN = Pattern.compile(
 
 
   private static final Pattern N_FUNCTION_PATTERN = Pattern.compile(
-      "function\\(\\s*(" + VARIABLE_PART + ")\\s*\\)\\s*\\{" +
-          "var\\s*(" + VARIABLE_PART + ")=\\1\\[" + VARIABLE_PART + "\\[\\d+\\]\\]\\(" + VARIABLE_PART + "\\[\\d+\\]\\)" +
-          ".*?catch\\(\\s*(\\w+)\\s*\\)\\s*\\{" +
-          "\\s*return.*?\\+\\s*\\1\\s*}" +
-          "\\s*return\\s*\\2\\[" + VARIABLE_PART + "\\[\\d+\\]\\]\\(" + VARIABLE_PART + "\\[\\d+\\]\\)};",
+      "(?:(?!\\.).|^)([\$_a-zA-Z\xA0-\uFFFF][\$\w\xA0-\uFFFF]{0,1})\s*=\s*function\s*\((\w+)\)\s*\{",
       Pattern.DOTALL
   );
 
