@@ -39,7 +39,7 @@ import java.util.stream.Stream;
 import static com.sedmelluq.discord.lavaplayer.tools.ExceptionTools.throwWithDebugInfo;
 
 /**
- * Handles parsing and caching of signature cipherss
+ * Handles parsing and caching of signature ciphers
  */
 @SuppressWarnings({"RegExpRedundantEscape", "RegExpUnnecessaryNonCapturingGroup"})
 public class SignatureCipherManager {
@@ -65,22 +65,15 @@ public class SignatureCipherManager {
           "\\s*" + VARIABLE_PART_OBJECT_DECLARATION + "\\s*:\\s*function\\s*\\([^)]*\\)\\s*\\{[^{}]*(?:\\{[^{}]*}[^{}]*)*}\\s*," +
           "\\s*" + VARIABLE_PART_OBJECT_DECLARATION + "\\s*:\\s*function\\s*\\([^)]*\\)\\s*\\{[^{}]*(?:\\{[^{}]*}[^{}]*)*}\\s*};");
 
-private static final Pattern SIG_FUNCTION_DECLARATION_PATTERN = Pattern.compile(
-    "function\\s+(?:" + VARIABLE_PART + ")\\s*\\(\\s*(" + VARIABLE_PART + ")\\s*\\)\\s*\\{([\\s\\S]{0,2000}?)return\\s+\\1\\s*;?\\s*\\}",
+private static final Pattern SIG_FUNCTION_PATTERN = Pattern.compile(
+    "([a-zA-Z_0-9$]+)=function\\(([a-zA-Z_0-9$]+),([a-zA-Z_0-9$]+)\\){var\\s+([a-zA-Z_0-9$]+)=new\\s+([a-zA-Z_0-9$]+)\\(([a-zA-Z_0-9$]+)\\);",
     Pattern.DOTALL
 );
 
-private static final Pattern SIG_FUNCTION_ASSIGNMENT_PATTERN = Pattern.compile(
-    "(" + VARIABLE_PART + ")\\s*=\\s*function\\s*\\(\\s*(" + VARIABLE_PART + ")\\s*\\)\\s*\\{([\\s\\S]{0,2000}?)return\\s+\\2\\s*;?\\s*\\}",
-    Pattern.DOTALL
-);
-
-// Match a function that takes 1 arg, mutates it, and returns join("")
 private static final Pattern N_FUNCTION_PATTERN = Pattern.compile(
-    "function\\s*([a-zA-Z0-9_$]{1,6})\\s*\\(\\s*([a-zA-Z0-9_$]+)\\s*\\)\\s*\\{[^}]*?\\.split\\(\"\"\\)[^}]*?\\.join\\(\"\"\\)\\s*;?\\s*\\}",
+    "([a-zA-Z_0-9$]+)=function\\(([a-zA-Z_0-9$]+)\\)\\{var\\s+([a-zA-Z_0-9$]+)=\\2\\.split\\(\"\"\\);.*?",
     Pattern.DOTALL
 );
-
 
   // old?
   private static final Pattern functionPatternOld = Pattern.compile(
@@ -250,51 +243,40 @@ private static final Pattern N_FUNCTION_PATTERN = Pattern.compile(
     }
   }
 
-  private SignatureCipher extractFromScript(@NotNull String script, @NotNull String sourceUrl) {
+private SignatureCipher extractFromScript(@NotNull String script, @NotNull String sourceUrl) {
     Matcher scriptTimestamp = TIMESTAMP_PATTERN.matcher(script);
-
     if (!scriptTimestamp.find()) {
       scriptExtractionFailed(script, sourceUrl, ExtractionFailureType.TIMESTAMP_NOT_FOUND);
     }
 
     Matcher globalVarsMatcher = GLOBAL_VARS_PATTERN.matcher(script);
-
     if (!globalVarsMatcher.find()) {
       scriptExtractionFailed(script, sourceUrl, ExtractionFailureType.VARIABLES_NOT_FOUND);
     }
 
     Matcher sigActionsMatcher = ACTIONS_PATTERN.matcher(script);
-
     if (!sigActionsMatcher.find()) {
       scriptExtractionFailed(script, sourceUrl, ExtractionFailureType.SIG_ACTIONS_NOT_FOUND);
     }
-String sigFunction = null;
-    // Try declaration first
-Matcher decl = SIG_FUNCTION_DECLARATION_PATTERN.matcher(script);
-if (decl.find()) {
-  // full matched function text
-  sigFunction = decl.group(0);
-} else {
-  // Try assignment form (var = function(...) {...})
-  Matcher assign = SIG_FUNCTION_ASSIGNMENT_PATTERN.matcher(script);
-  if (assign.find()) {
-    sigFunction = assign.group(0);
-  }
-}
 
-if (sigFunction == null) {
-  scriptExtractionFailed(script, sourceUrl, ExtractionFailureType.DECIPHER_FUNCTION_NOT_FOUND);
-}
-
+    // New way to find sig function
+    Matcher sigFunctionMatcher = SIG_FUNCTION_PATTERN.matcher(script);
+    if (!sigFunctionMatcher.find()) {
+        scriptExtractionFailed(script, sourceUrl, ExtractionFailureType.DECIPHER_FUNCTION_NOT_FOUND);
+    }
+    
+    // New way to find n function
     Matcher nFunctionMatcher = N_FUNCTION_PATTERN.matcher(script);
-
     if (!nFunctionMatcher.find()) {
-      scriptExtractionFailed(script, sourceUrl, ExtractionFailureType.N_FUNCTION_NOT_FOUND);
+        scriptExtractionFailed(script, sourceUrl, ExtractionFailureType.N_FUNCTION_NOT_FOUND);
     }
 
     String timestamp = scriptTimestamp.group(2);
     String globalVars = globalVarsMatcher.group("code");
     String sigActions = sigActionsMatcher.group(0);
+
+    // The entire matched function body is in group 0
+    String sigFunction = sigFunctionMatcher.group(0); 
     String nFunction = nFunctionMatcher.group(0);
 
     String nfParameterName = DataFormatTools.extractBetween(nFunction, "(", ")");
@@ -302,7 +284,7 @@ if (sigFunction == null) {
     nFunction = nFunction.replaceAll("if\\s*\\(typeof\\s*[^\\s()]+\\s*===?.*?\\)return " + nfParameterName + "\\s*;?", "");
 
     return new SignatureCipher(timestamp, globalVars, sigActions, sigFunction, nFunction, script);
-  }
+}
 
   private void scriptExtractionFailed(String script, String sourceUrl, ExtractionFailureType failureType) {
     dumpProblematicScript(script, sourceUrl, "must find " + failureType.friendlyName);
