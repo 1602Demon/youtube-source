@@ -55,6 +55,7 @@ public class SignatureCipherManagerTest {
      * Test our current implementation with the latest YouTube script
      */
     @Test
+@Disabled("YouTube script changes frequently, so live test is unreliable")
     public void testCurrentYoutubeScript() throws IOException {
         try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
             HttpInterface httpInterface = new HttpInterface(httpClient, new HttpClientContext(), true, noOpFilter);
