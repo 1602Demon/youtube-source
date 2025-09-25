@@ -297,7 +297,6 @@ if (sigFunction == null) {
     String timestamp = scriptTimestamp.group(2);
     String globalVars = globalVarsMatcher.group("code");
     String sigActions = sigActionsMatcher.group(0);
-    String sigFunction = sigFunctionMatcher.group(0);
     String nFunction = nFunctionMatcher.group(0);
 
     String nfParameterName = DataFormatTools.extractBetween(nFunction, "(", ")");
