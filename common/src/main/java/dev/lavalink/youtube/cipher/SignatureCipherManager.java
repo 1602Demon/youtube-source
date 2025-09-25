@@ -75,14 +75,12 @@ private static final Pattern SIG_FUNCTION_ASSIGNMENT_PATTERN = Pattern.compile(
     Pattern.DOTALL
 );
 
-  private static final Pattern N_FUNCTION_PATTERN = Pattern.compile(
-      "function\\(\\s*(" + VARIABLE_PART + ")\\s*\\)\\s*\\{" +
-          "var\\s*(" + VARIABLE_PART + ")=\\1\\[" + VARIABLE_PART + "\\[\\d+\\]\\]\\(" + VARIABLE_PART + "\\[\\d+\\]\\)" +
-          ".*?catch\\(\\s*(\\w+)\\s*\\)\\s*\\{" +
-          "\\s*return.*?\\+\\s*\\1\\s*}" +
-          "\\s*return\\s*\\2\\[" + VARIABLE_PART + "\\[\\d+\\]\\]\\(" + VARIABLE_PART + "\\[\\d+\\]\\)};",
-      Pattern.DOTALL
-  );
+// Match a function that takes 1 arg, mutates it, and returns join("")
+private static final Pattern N_FUNCTION_PATTERN = Pattern.compile(
+    "function\\s*(?:[a-zA-Z0-9_$]+)?\\s*\\(\\s*(" + VARIABLE_PART + ")\\s*\\)\\s*\\{([\\s\\S]{0,2000}?return\\s+\\1\\.join\\(\"\"\\);)\\}",
+    Pattern.DOTALL
+);
+
 
   // old?
   private static final Pattern functionPatternOld = Pattern.compile(
