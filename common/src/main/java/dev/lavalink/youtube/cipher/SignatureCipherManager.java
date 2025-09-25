@@ -241,49 +241,62 @@ public class SignatureCipherManager {
         }
     }
 
-    private SignatureCipher extractFromScript(@NotNull String script, @NotNull String sourceUrl) {
-        Matcher scriptTimestamp = TIMESTAMP_PATTERN.matcher(script);
-
-        if (!scriptTimestamp.find()) {
-            scriptExtractionFailed(script, sourceUrl, ExtractionFailureType.TIMESTAMP_NOT_FOUND);
-        }
-
-        Matcher globalVarsMatcher = GLOBAL_VARS_PATTERN.matcher(script);
-
-        if (!globalVarsMatcher.find()) {
-            scriptExtractionFailed(script, sourceUrl, ExtractionFailureType.VARIABLES_NOT_FOUND);
-        }
-
-        Matcher sigActionsMatcher = ACTIONS_PATTERN.matcher(script);
-
-        if (!sigActionsMatcher.find()) {
-            scriptExtractionFailed(script, sourceUrl, ExtractionFailureType.SIG_ACTIONS_NOT_FOUND);
-        }
-
-        Matcher sigFunctionMatcher = SIG_FUNCTION_PATTERN.matcher(script);
-
-        if (!sigFunctionMatcher.find()) {
-            scriptExtractionFailed(script, sourceUrl, ExtractionFailureType.DECIPHER_FUNCTION_NOT_FOUND);
-        }
-
-        Matcher nFunctionMatcher = N_FUNCTION_PATTERN.matcher(script);
-
-        if (!nFunctionMatcher.find()) {
-            scriptExtractionFailed(script, sourceUrl, ExtractionFailureType.N_FUNCTION_NOT_FOUND);
-        }
-
-        String timestamp = scriptTimestamp.group(2);
-        String globalVars = globalVarsMatcher.group("code");
-        String sigActions = sigActionsMatcher.group(0);
-        String sigFunction = sigFunctionMatcher.group(0);
-        String nFunction = nFunctionMatcher.group(0);
-
-        String nfParameterName = DataFormatTools.extractBetween(nFunction, "(", ")");
-        // Remove short-circuit that prevents n challenge transformation
-        nFunction = nFunction.replaceAll("if\\s*\\(typeof\\s*[^\\s()]+\\s*===?.*?\\)return " + nfParameterName + "\\s*;?", "");
-
-        return new SignatureCipher(timestamp, globalVars, sigActions, sigFunction, nFunction, script);
+private SignatureCipher extractFromScript(@NotNull String script, @NotNull String sourceUrl) {
+    Matcher scriptTimestamp = TIMESTAMP_PATTERN.matcher(script);
+    if (!scriptTimestamp.find()) {
+        scriptExtractionFailed(script, sourceUrl, ExtractionFailureType.TIMESTAMP_NOT_FOUND);
     }
+    Matcher sigActionsMatcher = ACTIONS_PATTERN.matcher(script);
+    if (!sigActionsMatcher.find()) {
+        scriptExtractionFailed(script, sourceUrl, ExtractionFailureType.SIG_ACTIONS_NOT_FOUND);
+    }
+    Matcher sigFunctionMatcher = SIG_FUNCTION_PATTERN.matcher(script);
+    if (!sigFunctionMatcher.find()) {
+        scriptExtractionFailed(script, sourceUrl, ExtractionFailureType.DECIPHER_FUNCTION_NOT_FOUND);
+    }
+    Matcher nFunctionMatcher = N_FUNCTION_PATTERN.matcher(script);
+    if (!nFunctionMatcher.find()) {
+        scriptExtractionFailed(script, sourceUrl, ExtractionFailureType.N_FUNCTION_NOT_FOUND);
+    }
+
+    String timestamp = scriptTimestamp.group(2);
+    String sigActions = sigActionsMatcher.group(0);
+    String sigFunction = sigFunctionMatcher.group(0);
+    String nFunction = nFunctionMatcher.group(0);
+    String nfParameterName = DataFormatTools.extractBetween(nFunction, "(", ")");
+    // Remove short-circuit that prevents n challenge transformation
+    nFunction = nFunction.replaceAll("if\\s*\\(typeof\\s*[^\\s()]+\\s*===?.*?\\)return " + nfParameterName + "\\s*;?", "");
+    
+    // This is the new part for finding the functions
+    Pattern functionPattern = Pattern.compile(
+        "var\\s+([A-Za-z0-9_]+)\\s*=\\s*function\\s*\\(([A-Za-z0-9_]+)\\)\\s*\\{.*?\\};",
+        Pattern.DOTALL
+    );
+
+    String sigFuncName = null;
+    String nFuncName = null;
+
+    Matcher m = functionPattern.matcher(script);
+    while (m.find()) {
+        String funcBody = m.group(0);
+        if (funcBody.contains(".split(\"\").reverse().join(\"\")")) {
+            sigFuncName = m.group(1);
+        }
+        if (funcBody.contains("return")) {
+            nFuncName = m.group(1);
+        }
+    }
+
+    if (sigFuncName == null) {
+        scriptExtractionFailed(script, sourceUrl, ExtractionFailureType.DECIPHER_FUNCTION_NOT_FOUND);
+    }
+    if (nFuncName == null) {
+        scriptExtractionFailed(script, sourceUrl, ExtractionFailureType.N_FUNCTION_NOT_FOUND);
+    }
+
+    // Now, create the new signature cipher with the dynamically found functions
+    return new SignatureCipher(timestamp, sigActions, sigFunction, nFunction, script, sigFuncName, nFuncName);
+}
 
     private void scriptExtractionFailed(String script, String sourceUrl, ExtractionFailureType failureType) {
         dumpProblematicScript(script, sourceUrl, "must find " + failureType.friendlyName);
