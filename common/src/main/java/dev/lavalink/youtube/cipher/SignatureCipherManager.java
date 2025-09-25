@@ -70,8 +70,8 @@ private static final Pattern SIG_FUNCTION_PATTERN = Pattern.compile(
   );
 
 
-  private static final Pattern N_FUNCTION_PATTERN = Pattern.compile(
-    "(?:(?!\\\\.).|^)([\$_a-zA-Z\\xA0-\uFFFF][\$\\w\\xA0-\uFFFF]{0,1})\\s*=\\s*function\\s*\\((\\w+)\\)\\s*\\{"
+private static final Pattern N_FUNCTION_PATTERN = Pattern.compile(
+    "(?:(?!\\\\.).|^)([\$_a-zA-Z\\u00A0-\uFFFF][\$\\w\\u00A0-\uFFFF]{0,1})\\s*=\\s*function\\s*\\((\\w+)\\)\\s*\\{"
 );
 
   // old?
