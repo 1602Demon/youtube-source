@@ -77,8 +77,7 @@ private static final Pattern SIG_FUNCTION_ASSIGNMENT_PATTERN = Pattern.compile(
 
 // Match a function that takes 1 arg, mutates it, and returns join("")
 private static final Pattern N_FUNCTION_PATTERN = Pattern.compile(
-    "function\\s*([a-zA-Z0-9_$]{2,})\\s*\\(\\s*(" + VARIABLE_PART + ")\\s*\\)\\s*\\{\\s*"
-  + "\\2=\\2\\.split\\(\"\"\\);[\\s\\S]{0,1000}?return\\s+\\2\\.join\\(\"\"\\);\\s*\\}",
+    "function\\s*([a-zA-Z0-9_$]{1,6})\\s*\\(\\s*([a-zA-Z0-9_$]+)\\s*\\)\\s*\\{[^}]*?\\.split\\(\"\"\\)[^}]*?\\.join\\(\"\"\\)\\s*;?\\s*\\}",
     Pattern.DOTALL
 );
 
