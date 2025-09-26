@@ -21,89 +21,76 @@ public class SignatureCipher {
   public final String nFunction;
   public final String rawScript;
 
-  public SignatureCipher(@NotNull String timestamp,
-                         @NotNull String globalVars,
-                         @NotNull String sigActions,
-                         @NotNull String sigFunction,
-                         @NotNull String nFunction,
-                         @NotNull String rawScript) {
-    this.timestamp = timestamp;
-    this.globalVars = globalVars;
-    this.sigActions = sigActions;
-    this.sigFunction = sigFunction;
-    this.nFunction = nFunction;
-    this.rawScript = rawScript;
-  }
+  public SignatureCipher(String timestamp, String globalVars, String sigActions, String sigFunction, String nFunction, String rawScript) {
+        this.timestamp = timestamp;
+        this.globalVars = globalVars;
+        this.sigActions = sigActions;
+        this.sigFunction = sigFunction;
+        this.nFunction = nFunction;
+        this.rawScript = rawScript;
+    }
 
-  /**
-   * @param text Text to apply the cipher on
-   * @return The result of the cipher on the input text
-   */
-  public String apply(@NotNull String text,
-                      @NotNull ScriptEngine scriptEngine) throws ScriptException, NoSuchMethodException {
-    String transformed;
+    /**
+     * Apply the signature decipher (the "s" parameter).
+     */
+    public String apply(String signature, ScriptEngine engine) throws ScriptException, NoSuchMethodException {
+        engine.eval(globalVars + ";" + sigActions + ";" + sigFunction);
+        Invocable invocable = (Invocable) engine;
+        Object raw = invocable.invokeFunction(extractFunctionName(sigFunction), signature);
+        return normalizeReturn(raw);
+    }
 
-    scriptEngine.eval(globalVars + ";" + sigActions + ";decrypt_sig=" + sigFunction);
-    transformed = (String) ((Invocable) scriptEngine).invokeFunction("decrypt_sig", text);
-    return transformed;
-  }
+    /**
+     * Transform the "n" parameter.
+     */
+    public String transform(String nParam, ScriptEngine engine) throws ScriptException, NoSuchMethodException {
+        if (nFunction == null || nFunction.isEmpty()) {
+            return nParam; // fallback: no transform
+        }
 
-//  /**
-//   * @param text Text to apply the cipher on
-//   * @return The result of the cipher on the input text
-//   */
-//  public String apply(@NotNull String text) {
-//    StringBuilder builder = new StringBuilder(text);
-//
-//    for (CipherOperation operation : operations) {
-//      switch (operation.type) {
-//        case SWAP:
-//          int position = operation.parameter % text.length();
-//          char temp = builder.charAt(0);
-//          builder.setCharAt(0, builder.charAt(position));
-//          builder.setCharAt(position, temp);
-//          break;
-//        case REVERSE:
-//          builder.reverse();
-//          break;
-//        case SLICE:
-//        case SPLICE:
-//          builder.delete(0, operation.parameter);
-//          break;
-//        default:
-//          throw new IllegalStateException("All branches should be covered");
-//      }
-//    }
-//
-//    return builder.toString();
-//  }
+        engine.eval(globalVars + ";" + sigActions + ";" + nFunction);
+        Invocable invocable = (Invocable) engine;
+        Object raw = invocable.invokeFunction(extractFunctionName(nFunction), nParam);
+        return normalizeReturn(raw);
+    }
 
-  /**
-   * @param text         Text to transform
-   * @param scriptEngine JavaScript engine to execute function
-   * @return The result of the n parameter transformation
-   */
-  public String transform(@NotNull String text, @NotNull ScriptEngine scriptEngine)
-      throws ScriptException, NoSuchMethodException {
-    String transformed;
+    /**
+     * Ensure we always return a String, even if the JS function returns a NativeArray.
+     */
+    private String normalizeReturn(Object raw) {
+        if (raw == null) return null;
 
-    scriptEngine.eval(globalVars + ";decrypt_nsig=" + nFunction);
-    transformed = (String) ((Invocable) scriptEngine).invokeFunction("decrypt_nsig", text);
+        if (raw instanceof String) {
+            return (String) raw;
+        } else if (raw instanceof NativeArray) {
+            NativeArray arr = (NativeArray) raw;
+            StringBuilder sb = new StringBuilder();
+            for (Object o : arr) {
+                if (o != null) sb.append(o.toString());
+            }
+            return sb.toString();
+        } else {
+            return raw.toString();
+        }
+    }
 
-    return transformed;
-  }
-
-//  /**
-//   * @param operation The operation to add to this cipher
-//   */
-//  public void addOperation(@NotNull CipherOperation operation) {
-//    operations.add(operation);
-//  }
-//
-//  /**
-//   * @return True if the cipher contains no operations.
-//   */
-//  public boolean isEmpty() {
-//    return operations.isEmpty();
-//  }
+    /**
+     * Extract function name from function declaration text.
+     */
+    private String extractFunctionName(String functionCode) {
+        // Example: "function Abc(a){...}" -> "Abc"
+        int idxStart = functionCode.indexOf("function");
+        if (idxStart >= 0) {
+            String after = functionCode.substring(idxStart + 8).trim();
+            int parenIdx = after.indexOf("(");
+            if (parenIdx > 0) {
+                String name = after.substring(0, parenIdx).trim();
+                if (!name.isEmpty()) {
+                    return name;
+                }
+            }
+        }
+        // fallback: anonymous function, Lavalink usually assigns to var before use
+        return null;
+    }
 }
