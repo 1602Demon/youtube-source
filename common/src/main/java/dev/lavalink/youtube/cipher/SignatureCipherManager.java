@@ -65,10 +65,16 @@ public class SignatureCipherManager {
           "\\s*" + VARIABLE_PART_OBJECT_DECLARATION + "\\s*:\\s*function\\s*\\([^)]*\\)\\s*\\{[^{}]*(?:\\{[^{}]*}[^{}]*)*}\\s*," +
           "\\s*" + VARIABLE_PART_OBJECT_DECLARATION + "\\s*:\\s*function\\s*\\([^)]*\\)\\s*\\{[^{}]*(?:\\{[^{}]*}[^{}]*)*}\\s*};");
 
-  private static final Pattern SIG_FUNCTION_PATTERN = Pattern.compile(
-      "function(?:\\s+" + VARIABLE_PART + ")?\\((" + VARIABLE_PART + ")\\)\\{" +
-          VARIABLE_PART + "=" + VARIABLE_PART + ".*?\\(\\1,\\d+\\);return\\s*\\1.*};"
-  );
+private static final Pattern SIG_FUNCTION_PATTERN = Pattern.compile(
+    "(" +
+        // function foo(a){ a=a.split(""); ...; return a.join(""); }
+        "function(?:\\s+" + VARIABLE_PART + ")?\\((" + VARIABLE_PART + ")\\)\\s*\\{[\\s\\S]{0,600}?split\\(\"\"\\)[\\s\\S]{0,600}?join\\(\"\"\\)[\\s\\S]{0,600}?\\}" +
+        "|" +
+        // var foo=function(a){ a=a.split(""); ...; return a.join(""); }
+        VARIABLE_PART + "\\s*=\\s*function\\(\\s*(" + VARIABLE_PART + ")\\s*\\)\\s*\\{[\\s\\S]{0,600}?split\\(\"\"\\)[\\s\\S]{0,600}?join\\(\"\"\\)[\\s\\S]{0,600}?\\}" +
+    ")",
+    Pattern.DOTALL
+);
 
 // Primary (legacy) n-function pattern (kept for older scripts)
 private static final Pattern N_FUNCTION_PATTERN = Pattern.compile(
