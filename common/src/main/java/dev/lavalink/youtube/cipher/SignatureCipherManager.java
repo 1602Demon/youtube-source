@@ -433,7 +433,11 @@ private static final Pattern N_FUNCTION_FALLBACK = Pattern.compile(
         int pos = assignM.start();
         String cand = extractEnclosingFunction.apply(pos);
         // require some sign it is an n transform (split/join or helper call)
-        if (cand != null && (cand.contains(".split(\"") || cand.matches("(?s).*\\([A-Za-z0-9_$]{1,6}\\s*,\\s*\\d+\\).*") || cand.contains(".join(\""))) ) {
+        if (cand != null && (
+    cand.contains(".split(\"") ||
+    cand.contains(".join(\"") ||
+    cand.matches(".*\\([A-Za-z0-9_$]{1,6}\\s*,\\s*\\d+\\).*")
+)) {
           nFunction = cand;
         }
       }
