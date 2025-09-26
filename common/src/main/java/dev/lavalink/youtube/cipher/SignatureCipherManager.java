@@ -76,7 +76,7 @@ private static final Pattern SIG_FUNCTION_PATTERN = Pattern.compile(
     Pattern.DOTALL
 );
 
-// Primary (legacy) n-function pattern (kept for older scripts)
+// Keep legacy strict pattern as fast path (older scripts)
 private static final Pattern N_FUNCTION_PATTERN = Pattern.compile(
     "function\\(\\s*(" + VARIABLE_PART + ")\\s*\\)\\s*\\{" +
         "var\\s*(" + VARIABLE_PART + ")=\\1\\[" + VARIABLE_PART + "\\[\\d+\\]\\]\\(" + VARIABLE_PART + "\\[\\d+\\]\\)" +
@@ -86,19 +86,18 @@ private static final Pattern N_FUNCTION_PATTERN = Pattern.compile(
     Pattern.DOTALL
 );
 
-// Fallback: more permissive search for any function / assigned function that splits and rejoins the string.
-// This covers forms like:
-//   function xyz(a){ a=a.split(''); ...; return a.join(''); }
-//   xyz=function(a){ return a.split('').reverse().join(''); }
-// and various helper-wrapped versions.
+// Permissive fallback: find any single-arg function or assigned function that performs split/join or calls helpers on the parameter.
+// This covers many modern minified styles where the transform is inline or uses helper calls.
 private static final Pattern N_FUNCTION_FALLBACK = Pattern.compile(
     "(" +
-        // named/anonymous function syntax: function name(a){ ... split('') ... join('') ... }
-        "function\\s*(?:" + VARIABLE_PART + ")?\\s*\\(\\s*(" + VARIABLE_PART + ")\\s*\\)\\s*\\{[\\s\\S]{0,600}?\\b\\2\\s*=\\s*\\2\\.split\\(\\s*['\"]{0,1}['\"]{0,1}\\s*\\)?" +
-            "[\\s\\S]{0,600}?\\.join\\(\\s*['\"]{0,1}['\"]{0,1}\\s*\\)[\\s\\S]{0,600}?\\}" +
-        "|" +
-        // assignment syntax: var name = function(a){ ... split('') ... join('') ... } or name=function(a){...}
-        VARIABLE_PART + "\\s*=\\s*function\\s*\\(\\s*(" + VARIABLE_PART + ")\\s*\\)\\s*\\{[\\s\\S]{0,700}?split\\(\\s*['\"]{0,1}['\"]{0,1}\\s*\\)[\\s\\S]{0,700}?join\\(\\s*['\"]{0,1}['\"]{0,1}\\s*\\)[\\s\\S]{0,700}?\\}" +
+      // function foo(a){ ... split(...) ... join(...) ... }
+      "function\\s*(?:[A-Za-z0-9_$]{0,10})\\s*\\(\\s*(" + VARIABLE_PART + ")\\s*\\)\\s*\\{[\\s\\S]{0,1200}?\\b" + "\\2" + "\\s*=\\s*\\2\\.split\\(\\s*['\"]{0,1}['\"]{0,1}\\s*\\)[\\s\\S]{0,1200}?\\.join\\(\\s*['\"]{0,1}['\"]{0,1}\\s*\\)[\\s\\S]{0,1200}?\\}" +
+      "|" +
+      // assignment form:  foo = function(a){ ... split(...) ... join(...) ... }
+      VARIABLE_PART + "\\s*=\\s*function\\s*\\(\\s*(" + VARIABLE_PART + ")\\s*\\)\\s*\\{[\\s\\S]{0,1200}?split\\(\\s*['\"]{0,1}['\"]{0,1}\\s*\\)[\\s\\S]{0,1200}?join\\(\\s*['\"]{0,1}['\"]{0,1}\\s*\\)[\\s\\S]{0,1200}?\\}" +
+      "|" +
+      // fallback to functions that call helpers with the param: e.g. a=helper(a,3); return a;
+      "function\\s*(?:[A-Za-z0-9_$]{0,10})\\s*\\(\\s*(" + VARIABLE_PART + ")\\s*\\)\\s*\\{[\\s\\S]{0,1200}?(?:[A-Za-z0-9_$]{1,6}\\s*\\(\\s*\\2\\s*,\\s*\\d+\\s*\\))[\\s\\S]{0,1200}?return\\s+\\2[\\s\\S]{0,1200}?\\}" +
     ")",
     Pattern.DOTALL
 );
@@ -306,29 +305,39 @@ String nFunction = null;
 if (nFunctionMatcher.find()) {
   nFunction = nFunctionMatcher.group(0);
 } else {
-  // Try permissive fallback search: any function/assignment that uses split('') and join('')
+  // Try permissive fallback patterns (split/join helpers or helper-calls style)
   Matcher fallback = N_FUNCTION_FALLBACK.matcher(script);
   if (fallback.find()) {
-    // group(1) will contain the whole matching function/assignment
+    // group(1) contains the whole matching function or assignment
     nFunction = fallback.group(1);
     log.debug("n function found using fallback pattern (script: {})", sourceUrl);
   }
 }
 
-if (nFunction == null) {
-  scriptExtractionFailed(script, sourceUrl, ExtractionFailureType.N_FUNCTION_NOT_FOUND);
+// Best-effort extraction & sanitize; if still not found, do not throw — proceed with empty n function
+if (nFunction != null) {
+  // Extract parameter name (best-effort)
+  String nfParameterName = DataFormatTools.extractBetween(nFunction, "(", ")");
+  // Remove short-circuit that prevents n challenge transformation (best-effort)
+  if (nfParameterName != null && !nfParameterName.isEmpty()) {
+    try {
+      nFunction = nFunction.replaceAll("if\\s*\\(typeof\\s*[^\\s()]+\\s*===?.*?\\)return " + nfParameterName + "\\s*;?", "");
+    } catch (Exception ex) {
+      // fallback: leave nFunction as-is if regex fails for some reason
+    }
+  }
+} else {
+  // Don't abort the whole extraction — log and continue with no n function.
+  dumpProblematicScript(script, sourceUrl, "n function not found; continuing without n transform (URLs may be throttled)");
+  log.warn("No n() transformation function identified in player script {}. Continuing without n transform; streams may be throttled.", sourceUrl);
+  nFunction = ""; // empty indicates no n-transformation available
 }
 
     String timestamp = scriptTimestamp.group(2);
     String globalVars = globalVarsMatcher.group("code");
     String sigActions = sigActionsMatcher.group(0);
 
-// Extract parameter name (best-effort)
-String nfParameterName = DataFormatTools.extractBetween(nFunction, "(", ")");
-// Remove short-circuit that prevents n challenge transformation (best-effort)
-if (nfParameterName != null && !nfParameterName.isEmpty()) {
-  nFunction = nFunction.replaceAll("if\\s*\\(typeof\\s*[^\\s()]+\\s*===?.*?\\)return " + nfParameterName + "\\s*;?", "");
-}
+
 
     return new SignatureCipher(timestamp, globalVars, sigActions, sigFunction, nFunction, script);
   }
