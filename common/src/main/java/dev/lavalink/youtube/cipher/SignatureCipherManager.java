@@ -76,7 +76,7 @@ private static final Pattern SIG_FUNCTION_PATTERN = Pattern.compile(
     Pattern.DOTALL
 );
 
-// Keep legacy strict pattern as fast path (older scripts)
+// Legacy strict n-function pattern (kept for older scripts)
 private static final Pattern N_FUNCTION_PATTERN = Pattern.compile(
     "function\\(\\s*(" + VARIABLE_PART + ")\\s*\\)\\s*\\{" +
         "var\\s*(" + VARIABLE_PART + ")=\\1\\[" + VARIABLE_PART + "\\[\\d+\\]\\]\\(" + VARIABLE_PART + "\\[\\d+\\]\\)" +
@@ -86,21 +86,24 @@ private static final Pattern N_FUNCTION_PATTERN = Pattern.compile(
     Pattern.DOTALL
 );
 
-// Permissive fallback: find any single-arg function or assigned function that performs split/join or calls helpers on the parameter.
-// This covers many modern minified styles where the transform is inline or uses helper calls.
+// Very-permissive fallback: match ANY single-arg function or assignment that either:
+//  - contains both .split(...) and .join(...)
+//  - OR calls a short helper with that param and then returns it
+// This will capture most modern minified n() implementations.
 private static final Pattern N_FUNCTION_FALLBACK = Pattern.compile(
     "(" +
-      // function foo(a){ ... split(...) ... join(...) ... }
-      "function\\s*(?:[A-Za-z0-9_$]{0,10})\\s*\\(\\s*(" + VARIABLE_PART + ")\\s*\\)\\s*\\{[\\s\\S]{0,1200}?\\b" + "\\2" + "\\s*=\\s*\\2\\.split\\(\\s*['\"]{0,1}['\"]{0,1}\\s*\\)[\\s\\S]{0,1200}?\\.join\\(\\s*['\"]{0,1}['\"]{0,1}\\s*\\)[\\s\\S]{0,1200}?\\}" +
+      // named function: function fname(a) { ... split(...) ... join(...) ... }
+      "function\\s*(?:[A-Za-z0-9_$]{0,14})\\s*\\(\\s*(" + VARIABLE_PART + ")\\s*\\)\\s*\\{[\\s\\S]{0,2000}?split\\s*\\(\\s*['\"]?['\"]?\\s*\\)[\\s\\S]{0,2000}?join\\s*\\(\\s*['\"]?['\"]?\\s*\\)[\\s\\S]{0,2000}?\\}" +
       "|" +
-      // assignment form:  foo = function(a){ ... split(...) ... join(...) ... }
-      VARIABLE_PART + "\\s*=\\s*function\\s*\\(\\s*(" + VARIABLE_PART + ")\\s*\\)\\s*\\{[\\s\\S]{0,1200}?split\\(\\s*['\"]{0,1}['\"]{0,1}\\s*\\)[\\s\\S]{0,1200}?join\\(\\s*['\"]{0,1}['\"]{0,1}\\s*\\)[\\s\\S]{0,1200}?\\}" +
+      // assignment: name=function(a){ ... split/join ... }
+      VARIABLE_PART + "\\s*=\\s*function\\s*\\(\\s*(" + VARIABLE_PART + ")\\s*\\)\\s*\\{[\\s\\S]{0,2200}?split\\s*\\(\\s*['\"]?['\"]?\\s*\\)[\\s\\S]{0,2200}?join\\s*\\(\\s*['\"]?['\"]?\\s*\\)[\\s\\S]{0,2200}?\\}" +
       "|" +
-      // fallback to functions that call helpers with the param: e.g. a=helper(a,3); return a;
-      "function\\s*(?:[A-Za-z0-9_$]{0,10})\\s*\\(\\s*(" + VARIABLE_PART + ")\\s*\\)\\s*\\{[\\s\\S]{0,1200}?(?:[A-Za-z0-9_$]{1,6}\\s*\\(\\s*\\2\\s*,\\s*\\d+\\s*\\))[\\s\\S]{0,1200}?return\\s+\\2[\\s\\S]{0,1200}?\\}" +
+      // helper-call style: function foo(a){ a = helper(a,NUM); return a; }
+      "function\\s*(?:[A-Za-z0-9_$]{0,14})\\s*\\(\\s*(" + VARIABLE_PART + ")\\s*\\)\\s*\\{[\\s\\S]{0,2000}?(?:[A-Za-z0-9_$]{1,8}\\s*\\(\\s*\\2\\s*,\\s*\\d+\\s*\\))[\\s\\S]{0,2000}?return\\s+\\2[\\s\\S]{0,2000}?\\}" +
     ")",
     Pattern.DOTALL
 );
+
 
   // old?
   private static final Pattern functionPatternOld = Pattern.compile(
@@ -299,38 +302,40 @@ if (sigFunctionMatcher.find()) {
   scriptExtractionFailed(script, sourceUrl, ExtractionFailureType.DECIPHER_FUNCTION_NOT_FOUND);
 }
 
+// --- begin replacement for n-function detection ---
 Matcher nFunctionMatcher = N_FUNCTION_PATTERN.matcher(script);
 String nFunction = null;
+String nFunctionSourceSnippet = null;
 
 if (nFunctionMatcher.find()) {
   nFunction = nFunctionMatcher.group(0);
+  nFunctionSourceSnippet = nFunction.length() > 300 ? nFunction.substring(0, 300) : nFunction;
+  log.debug("n function matched legacy pattern (script: {}) snippet: {}", sourceUrl, nFunctionSourceSnippet);
 } else {
-  // Try permissive fallback patterns (split/join helpers or helper-calls style)
+  // try permissive fallback
   Matcher fallback = N_FUNCTION_FALLBACK.matcher(script);
   if (fallback.find()) {
-    // group(1) contains the whole matching function or assignment
     nFunction = fallback.group(1);
-    log.debug("n function found using fallback pattern (script: {})", sourceUrl);
+    nFunctionSourceSnippet = nFunction.length() > 300 ? nFunction.substring(0, 300) : nFunction;
+    log.debug("n function matched fallback pattern (script: {}) snippet: {}", sourceUrl, nFunctionSourceSnippet);
   }
 }
 
-// Best-effort extraction & sanitize; if still not found, do not throw — proceed with empty n function
-if (nFunction != null) {
-  // Extract parameter name (best-effort)
+if (nFunction != null && !nFunction.isEmpty()) {
+  // best-effort cleanup: remove short-circuit that prevents n challenge transformation
   String nfParameterName = DataFormatTools.extractBetween(nFunction, "(", ")");
-  // Remove short-circuit that prevents n challenge transformation (best-effort)
   if (nfParameterName != null && !nfParameterName.isEmpty()) {
     try {
-      nFunction = nFunction.replaceAll("if\\s*\\(typeof\\s*[^\\s()]+\\s*===?.*?\\)return " + nfParameterName + "\\s*;?", "");
+      nFunction = nFunction.replaceAll("if\\s*\\(typeof\\s*[^\\s()]+\\s*===?.*?\\)return\\s+" + Pattern.quote(nfParameterName) + "\\s*;?", "");
     } catch (Exception ex) {
-      // fallback: leave nFunction as-is if regex fails for some reason
+      log.debug("Failed to strip n short-circuit for script {}: {}", sourceUrl, ex.getMessage());
     }
   }
 } else {
-  // Don't abort the whole extraction — log and continue with no n function.
-  dumpProblematicScript(script, sourceUrl, "n function not found; continuing without n transform (URLs may be throttled)");
+  // Don't abort extraction. Log & dump the script for later analysis and continue with no n transform.
+  dumpProblematicScript(script, sourceUrl, "n function not found; continuing without n transform (streams may be throttled)");
   log.warn("No n() transformation function identified in player script {}. Continuing without n transform; streams may be throttled.", sourceUrl);
-  nFunction = ""; // empty indicates no n-transformation available
+  nFunction = ""; // empty indicates no n-transform available
 }
 
     String timestamp = scriptTimestamp.group(2);
