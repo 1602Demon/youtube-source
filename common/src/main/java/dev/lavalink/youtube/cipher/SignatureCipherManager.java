@@ -67,11 +67,11 @@ public class SignatureCipherManager {
 
 private static final Pattern SIG_FUNCTION_PATTERN = Pattern.compile(
     "(" +
-        // function foo(a){ a=a.split(""); ...; return a.join(""); }
-        "function(?:\\s+" + VARIABLE_PART + ")?\\((" + VARIABLE_PART + ")\\)\\s*\\{[\\s\\S]{0,600}?split\\(\"\"\\)[\\s\\S]{0,600}?join\\(\"\"\\)[\\s\\S]{0,600}?\\}" +
+        // function foo(a){ a=a.split(""); ... return a.join(""); }
+        "function\\s+" + VARIABLE_PART + "\\s*\\(\\s*(" + VARIABLE_PART + ")\\s*\\)\\s*\\{[\\s\\S]{0,800}?\\.join\\(\"\"\\)[\\s\\S]{0,800}?\\}" +
         "|" +
-        // var foo=function(a){ a=a.split(""); ...; return a.join(""); }
-        VARIABLE_PART + "\\s*=\\s*function\\(\\s*(" + VARIABLE_PART + ")\\s*\\)\\s*\\{[\\s\\S]{0,600}?split\\(\"\"\\)[\\s\\S]{0,600}?join\\(\"\"\\)[\\s\\S]{0,600}?\\}" +
+        // foo=function(a){ a=a.split(""); ... return a.join(""); }
+        VARIABLE_PART + "\\s*=\\s*function\\s*\\(\\s*(" + VARIABLE_PART + ")\\s*\\)\\s*\\{[\\s\\S]{0,800}?\\.join\\(\"\"\\)[\\s\\S]{0,800}?\\}" +
     ")",
     Pattern.DOTALL
 );
@@ -290,11 +290,15 @@ private static final Pattern N_FUNCTION_FALLBACK = Pattern.compile(
       scriptExtractionFailed(script, sourceUrl, ExtractionFailureType.SIG_ACTIONS_NOT_FOUND);
     }
 
-    Matcher sigFunctionMatcher = SIG_FUNCTION_PATTERN.matcher(script);
+Matcher sigFunctionMatcher = SIG_FUNCTION_PATTERN.matcher(script);
+String sigFunction = null;
 
-    if (!sigFunctionMatcher.find()) {
-      scriptExtractionFailed(script, sourceUrl, ExtractionFailureType.DECIPHER_FUNCTION_NOT_FOUND);
-    }
+if (sigFunctionMatcher.find()) {
+  sigFunction = sigFunctionMatcher.group(0);
+} else {
+  dumpProblematicScript(script, sourceUrl, "could not match sig function with known patterns");
+  scriptExtractionFailed(script, sourceUrl, ExtractionFailureType.DECIPHER_FUNCTION_NOT_FOUND);
+}
 
 Matcher nFunctionMatcher = N_FUNCTION_PATTERN.matcher(script);
 String nFunction = null;
@@ -318,7 +322,6 @@ if (nFunction == null) {
     String timestamp = scriptTimestamp.group(2);
     String globalVars = globalVarsMatcher.group("code");
     String sigActions = sigActionsMatcher.group(0);
-    String sigFunction = sigFunctionMatcher.group(0);
 
 // Extract parameter name (best-effort)
 String nfParameterName = DataFormatTools.extractBetween(nFunction, "(", ")");
