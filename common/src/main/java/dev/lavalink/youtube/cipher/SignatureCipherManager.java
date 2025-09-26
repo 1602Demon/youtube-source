@@ -274,78 +274,240 @@ private static final Pattern N_FUNCTION_FALLBACK = Pattern.compile(
   }
 
   private SignatureCipher extractFromScript(@NotNull String script, @NotNull String sourceUrl) {
-    Matcher scriptTimestamp = TIMESTAMP_PATTERN.matcher(script);
-
-    if (!scriptTimestamp.find()) {
-      scriptExtractionFailed(script, sourceUrl, ExtractionFailureType.TIMESTAMP_NOT_FOUND);
+  // helper lambdas (anonymous inner style)
+  final java.util.function.BiFunction<String, Integer, Integer> findFunctionStart = (s, pos) -> {
+    // scan backwards from pos to find "function" or "=function" or identifier "=" (assignment)
+    int i = pos;
+    while (i > 0) {
+      // look for "function" keyword
+      int idx = s.lastIndexOf("function", i);
+      int assignIdx = s.lastIndexOf("=", i);
+      int varIdx = s.lastIndexOf("var", i);
+      int candidate = Math.max(idx, Math.max(assignIdx, varIdx));
+      if (candidate < 0) return -1;
+      // if "function" is present and before assign/var, prefer it
+      if (idx >= 0 && idx == candidate) {
+        return idx;
+      }
+      // if we saw "var" or "=", step back a bit and continue searching for "function"
+      i = candidate - 1;
     }
+    return -1;
+  };
 
-    Matcher globalVarsMatcher = GLOBAL_VARS_PATTERN.matcher(script);
-
-    if (!globalVarsMatcher.find()) {
-      scriptExtractionFailed(script, sourceUrl, ExtractionFailureType.VARIABLES_NOT_FOUND);
+  final java.util.function.BiFunction<String, Integer, Integer> findEnclosingBlockEnd = (s, start) -> {
+    // given position of '{' (start), find matching '}' with brace counting
+    int len = s.length();
+    int i = start;
+    int depth = 0;
+    for (; i < len; i++) {
+      char c = s.charAt(i);
+      if (c == '{') depth++;
+      else if (c == '}') {
+        depth--;
+        if (depth == 0) return i;
+      }
     }
+    return -1;
+  };
 
-    Matcher sigActionsMatcher = ACTIONS_PATTERN.matcher(script);
-
-    if (!sigActionsMatcher.find()) {
-      scriptExtractionFailed(script, sourceUrl, ExtractionFailureType.SIG_ACTIONS_NOT_FOUND);
-    }
-
-Matcher sigFunctionMatcher = SIG_FUNCTION_PATTERN.matcher(script);
-String sigFunction = null;
-
-if (sigFunctionMatcher.find()) {
-  sigFunction = sigFunctionMatcher.group(0);
-} else {
-  dumpProblematicScript(script, sourceUrl, "could not match sig function with known patterns");
-  scriptExtractionFailed(script, sourceUrl, ExtractionFailureType.DECIPHER_FUNCTION_NOT_FOUND);
-}
-
-// --- begin replacement for n-function detection ---
-Matcher nFunctionMatcher = N_FUNCTION_PATTERN.matcher(script);
-String nFunction = null;
-String nFunctionSourceSnippet = null;
-
-if (nFunctionMatcher.find()) {
-  nFunction = nFunctionMatcher.group(0);
-  nFunctionSourceSnippet = nFunction.length() > 300 ? nFunction.substring(0, 300) : nFunction;
-  log.debug("n function matched legacy pattern (script: {}) snippet: {}", sourceUrl, nFunctionSourceSnippet);
-} else {
-  // try permissive fallback
-  Matcher fallback = N_FUNCTION_FALLBACK.matcher(script);
-  if (fallback.find()) {
-    nFunction = fallback.group(1);
-    nFunctionSourceSnippet = nFunction.length() > 300 ? nFunction.substring(0, 300) : nFunction;
-    log.debug("n function matched fallback pattern (script: {}) snippet: {}", sourceUrl, nFunctionSourceSnippet);
+  // 1) timestamp
+  Matcher scriptTimestamp = TIMESTAMP_PATTERN.matcher(script);
+  if (!scriptTimestamp.find()) {
+    scriptExtractionFailed(script, sourceUrl, ExtractionFailureType.TIMESTAMP_NOT_FOUND);
   }
-}
+  String timestamp = scriptTimestamp.group(2);
 
-if (nFunction != null && !nFunction.isEmpty()) {
-  // best-effort cleanup: remove short-circuit that prevents n challenge transformation
-  String nfParameterName = DataFormatTools.extractBetween(nFunction, "(", ")");
-  if (nfParameterName != null && !nfParameterName.isEmpty()) {
-    try {
+  // 2) global vars (existing logic)
+  Matcher globalVarsMatcher = GLOBAL_VARS_PATTERN.matcher(script);
+  if (!globalVarsMatcher.find()) {
+    scriptExtractionFailed(script, sourceUrl, ExtractionFailureType.VARIABLES_NOT_FOUND);
+  }
+  String globalVars = globalVarsMatcher.group("code");
+
+  // 3) Find candidate sig-function and n-function by searching for canonical tokens
+  String sigFunction = null;
+  String sigActions = "";
+  String nFunction = null;
+
+  // Utility: find nearest enclosing function/assignment around an index, using brace matching
+  java.util.function.Function<Integer, String> extractEnclosingFunction = (posIndex) -> {
+    int len = script.length();
+    // find opening brace '{' after nearest "function" or "function(" occurrence
+    int openBrace = script.indexOf('{', posIndex);
+    if (openBrace < 0) return null;
+    int endBrace = findEnclosingBlockEnd.apply(script, openBrace);
+    if (endBrace < 0) return null;
+    // include potential "var name = function(...){...}" prefix by scanning backwards a bit
+    int scanBack = Math.max(0, posIndex - 120);
+    int prefixStart = script.lastIndexOf("function", posIndex);
+    if (prefixStart < 0) {
+      // try to find an assignment start
+      int assign = script.lastIndexOf("=", posIndex);
+      int varkw = script.lastIndexOf("var", posIndex);
+      int start = Math.max(assign, varkw);
+      if (start > scanBack) prefixStart = start;
+      else prefixStart = Math.max(scanBack, prefixStart);
+    }
+    // clamp prefixStart
+    if (prefixStart < 0) prefixStart = scanBack;
+    String candidate = script.substring(prefixStart, endBrace + 1);
+    return candidate;
+  };
+
+  // Search function for patterns: split("") + join("") (sig) OR split/join or helpers (n)
+  // We'll do a two-pass approach: try to find signature decipher (sig) first then n.
+
+  // Try to locate signature function: search for ".split(\"\"" and ".join(\"\""
+  int idx = 0;
+  boolean sigFound = false;
+  while (true) {
+    int sidx = script.indexOf(".split(\"", idx);
+    if (sidx < 0) break;
+    // check if join appears nearby
+    int jidx = script.indexOf(".join(\"", sidx);
+    if (jidx > 0 && jidx - sidx < 4000) {
+      // extract enclosing function near sidx
+      int funcKeyword = script.lastIndexOf("function", sidx);
+      int assignKeyword = script.lastIndexOf("=function", sidx);
+      int startPos = Math.max(funcKeyword, assignKeyword);
+      if (startPos < 0) startPos = Math.max(0, sidx - 120);
+      String candidate = extractEnclosingFunction.apply(startPos);
+      if (candidate != null && candidate.length() > 0) {
+        // sanity: require that param is returned or joined
+        if (candidate.contains(".join(\"") || candidate.matches("(?s).*return\\s+[a-zA-Z0-9_$]+.*")) {
+          sigFunction = candidate;
+          sigFound = true;
+          break;
+        }
+      }
+    }
+    idx = sidx + 6;
+  }
+
+  // If we didn't find a sig function via split/join, try to find an assignment of form: name=function(a){ ... return a; }
+  if (!sigFound) {
+    Pattern altSig = Pattern.compile("([A-Za-z0-9_$]{1,20})\\s*=\\s*function\\s*\\(\\s*([A-Za-z0-9_$]+)\\s*\\)\\s*\\{", Pattern.DOTALL);
+    Matcher malt = altSig.matcher(script);
+    if (malt.find()) {
+      int p = malt.start();
+      String cand = extractEnclosingFunction.apply(p);
+      if (cand != null && cand.contains(".join(\"")) {
+        sigFunction = cand;
+        sigFound = true;
+      }
+    }
+  }
+
+  // If sig still not found: try older ACTIONS_PATTERN (helper object) fallback
+  String sigHelperObjName = null;
+  if (!sigFound) {
+    Matcher actions = ACTIONS_PATTERN.matcher(script);
+    if (actions.find()) {
+      sigActions = actions.group(0);
+      sigHelperObjName = actions.group(1);
+    }
+    // try to also find an inline function name referring to that actions name
+    // (best-effort) - fall through
+  }
+
+  // Now find an n() transform. Typical signs: ".split(\"\")", helper calls like "h(a,3)", or "return a.join('')"
+  // We search for short functions that either contain split/join or call a helper with the arg and return it.
+  Pattern nLikeSplit = Pattern.compile("function\\s*(?:[A-Za-z0-9_$]{0,14})\\s*\\(\\s*([A-Za-z0-9_$]+)\\s*\\)\\s*\\{[\\s\\S]{0,1200}?split\\s*\\(\\s*['\"]?['\"]?\\s*\\)[\\s\\S]{0,1200}?join\\s*\\(\\s*['\"]?['\"]?\\s*\\)[\\s\\S]{0,1200}?\\}", Pattern.DOTALL);
+  Matcher nLike = nLikeSplit.matcher(script);
+  if (nLike.find()) {
+    int pos = nLike.start();
+    nFunction = extractEnclosingFunction.apply(pos);
+  } else {
+    // helper-call style: function foo(a){ a = h(a,3); return a; }
+    Pattern nHelperCall = Pattern.compile("function\\s*(?:[A-Za-z0-9_$]{0,14})\\s*\\(\\s*([A-Za-z0-9_$]+)\\s*\\)\\s*\\{[\\s\\S]{0,1200}?[A-Za-z0-9_$]{1,6}\\s*\\(\\s*\\1\\s*,\\s*\\d+\\s*\\)[\\s\\S]{0,1200}?return\\s+\\1[\\s\\S]{0,1200}?\\}", Pattern.DOTALL);
+    Matcher hmat = nHelperCall.matcher(script);
+    if (hmat.find()) {
+      int pos = hmat.start();
+      nFunction = extractEnclosingFunction.apply(pos);
+    } else {
+      // assignment style: name=function(a){ ... }
+      Pattern nAssign = Pattern.compile("[A-Za-z0-9_$]{1,20}\\s*=\\s*function\\s*\\(\\s*([A-Za-z0-9_$]+)\\s*\\)\\s*\\{", Pattern.DOTALL);
+      Matcher assignM = nAssign.matcher(script);
+      if (assignM.find()) {
+        int pos = assignM.start();
+        String cand = extractEnclosingFunction.apply(pos);
+        // require some sign it is an n transform (split/join or helper call)
+        if (cand != null && (cand.contains(".split(\"") || cand.matches("(?s).*\\([A-Za-z0-9_$]{1,6}\\s*,\\s*\\d+\\).*") || cand.contains(".join(\""))) ) {
+          nFunction = cand;
+        }
+      }
+    }
+  }
+
+  // If we have sigFunction but missing helper object, try to extract referenced helper object names from the sigFunction body
+  if (sigFunction != null && (sigActions == null || sigActions.isEmpty())) {
+    // look for patterns like "Xy.z(a,3)" or "XyA(a,3)" inside sigFunction to identify helper object names
+    Pattern helperName = Pattern.compile("([A-Za-z0-9_$]{1,8})\\.([A-Za-z0-9_$]{1,8})\\s*\\(");
+    Matcher hnm = helperName.matcher(sigFunction);
+    if (hnm.find()) {
+      String objName = hnm.group(1);
+      // find var objName = { ... };
+      Pattern objPat = Pattern.compile("(var\\s+" + Pattern.quote(objName) + "\\s*=\\s*\\{[\\s\\S]{0,2000}?\\};)");
+      Matcher objM = objPat.matcher(script);
+      if (objM.find()) {
+        sigActions = objM.group(1);
+      } else {
+        // sometimes helper object assigned without var
+        objPat = Pattern.compile("(" + Pattern.quote(objName) + "\\s*=\\s*\\{[\\s\\S]{0,2000}?\\};)");
+        objM = objPat.matcher(script);
+        if (objM.find()) {
+          sigActions = objM.group(1);
+        }
+      }
+    }
+  }
+
+  // final fallback checks: older ACTIONS_PATTERN and SIG_FUNCTION_PATTERN
+  if (sigFunction == null) {
+    Matcher actions = ACTIONS_PATTERN.matcher(script);
+    if (actions.find()) {
+      sigActions = actions.group(0);
+      // try to find sig function by locating usages of the actions object
+      String objName = null;
+      Pattern objNamePat = Pattern.compile("var\\s+([A-Za-z0-9_$]{1,12})\\s*=\\s*\\{");
+      Matcher on = objNamePat.matcher(sigActions);
+      if (on.find()) objName = on.group(1);
+      if (objName != null) {
+        Pattern usePat = Pattern.compile(Pattern.quote(objName) + "\\.[A-Za-z0-9_$]{1,12}\\s*\\(");
+        Matcher up = usePat.matcher(script);
+        if (up.find()) {
+          int pos = Math.max(0, up.start() - 80);
+          sigFunction = extractEnclosingFunction.apply(pos);
+        }
+      }
+    }
+  }
+
+  // If still missing sigFunction or nFunction, dump and fail gracefully
+  if (sigFunction == null) {
+    dumpProblematicScript(script, sourceUrl, "must find decipher function (sig)");
+    throw new ScriptExtractionException("Must find decipher function from script: " + sourceUrl, ExtractionFailureType.DECIPHER_FUNCTION_NOT_FOUND);
+  }
+
+  if (nFunction == null) {
+    // Not fatal — some scripts don't expose a transform; we'll continue without n transform but dump for analysis
+    dumpProblematicScript(script, sourceUrl, "n function not found; continuing without n transform");
+    log.warn("No n() transformation function identified in player script {}. Continuing without n transform; streams may be throttled.", sourceUrl);
+    nFunction = "";
+  }
+
+  // Remove short-circuit in nFunction if present
+  if (nFunction != null && !nFunction.isEmpty()) {
+    String nfParameterName = DataFormatTools.extractBetween(nFunction, "(", ")");
+    if (nfParameterName != null && !nfParameterName.isEmpty()) {
       nFunction = nFunction.replaceAll("if\\s*\\(typeof\\s*[^\\s()]+\\s*===?.*?\\)return\\s+" + Pattern.quote(nfParameterName) + "\\s*;?", "");
-    } catch (Exception ex) {
-      log.debug("Failed to strip n short-circuit for script {}: {}", sourceUrl, ex.getMessage());
     }
   }
-} else {
-  // Don't abort extraction. Log & dump the script for later analysis and continue with no n transform.
-  dumpProblematicScript(script, sourceUrl, "n function not found; continuing without n transform (streams may be throttled)");
-  log.warn("No n() transformation function identified in player script {}. Continuing without n transform; streams may be throttled.", sourceUrl);
-  nFunction = ""; // empty indicates no n-transform available
+
+  // Return new SignatureCipher (timestamp, globalVars, actions, sigFunction, nFunction, fullScript)
+  return new SignatureCipher(timestamp, globalVars == null ? "" : globalVars, sigActions == null ? "" : sigActions, sigFunction, nFunction == null ? "" : nFunction, script);
 }
-
-    String timestamp = scriptTimestamp.group(2);
-    String globalVars = globalVarsMatcher.group("code");
-    String sigActions = sigActionsMatcher.group(0);
-
-
-
-    return new SignatureCipher(timestamp, globalVars, sigActions, sigFunction, nFunction, script);
-  }
 
   private void scriptExtractionFailed(String script, String sourceUrl, ExtractionFailureType failureType) {
     dumpProblematicScript(script, sourceUrl, "must find " + failureType.friendlyName);
